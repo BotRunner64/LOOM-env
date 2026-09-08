@@ -1,0 +1,14 @@
+id: tabletop_cube_container
+objects:
+  cube:
+    asset: primitive:cube
+    category: graspable_object
+  container:
+    asset: primitive:open_box
+    category: receptacle
+parameters:
+  table_height: 0.75
+  # Candidate layouts, not accepted simulation states.
+  cube_position_min: [0.4, -0.15, 0.77]
+  cube_position_max: [0.6, 0.15, 0.77]
+  container_position: [0.5, 0.0, 0.80]

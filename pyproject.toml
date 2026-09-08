@@ -52,3 +52,7 @@ namespaces = false
 target-version = "py312"
 line-length = 88
 extend-exclude = [".deps"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--strict-config --strict-markers"

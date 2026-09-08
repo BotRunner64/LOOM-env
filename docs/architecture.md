@@ -1,6 +1,7 @@
 # LOOM-env 架构设计
 
-状态：设计草案，尚未实现或做运行验证。  
+状态：架构设计与分阶段计划。阶段 A 的配置、Runner、任务检查与离线数据基础已实现并通过自动化测试；已增加真实双 Panda 关节运动诊断和视频导出，抓取放置仿真闭环尚未验证。详见 [当前实现](implementation.md)。
+
 更新日期：2026-09-08。实际安装版本与验证结果见 [环境文档](environment.md)。
 
 总体方案：**一个 Python 包，以配置组合任务、场景和部署；专家与 Policy 共用一个 Runner；以 Episode 协议连接仿真生产与 Context 实验。** 本体统一采用双臂，每臂 6 或 7 自由度；先实现一种双臂本体、单任务闭环，再用第二种本体和任务检验扩展边界。
@@ -146,7 +147,7 @@ expert:
   planning_mode: one_arm_with_other_held
 ```
 
-示例中的预设名称仅用于说明配置结构，具体机器人型号尚未指定。专家将 `manipulator`、`support` 等操作角色绑定到 `left` / `right`；绑定可由配置指定或根据可达性选择，解析结果写入 Episode 元数据。任务声明角色所需能力和协作关系。
+示例中的预设名称仅用于说明配置结构，示例配置暂采用双 Panda，机器人型号与实际安装仍待确认和仿真验证。专家将 `manipulator`、`support` 等操作角色绑定到 `left` / `right`；绑定可由配置指定或根据可达性选择，解析结果写入 Episode 元数据。任务声明角色所需能力和协作关系。
 
 任务目标可以通过小规模的谓词库表达，如 `inside`、`on_top`、`released`、`drawer_open`。复杂的时序条件和接触行为通过 Python 扩展，不要求第一版实现完整任务描述语言。
 
@@ -253,8 +254,8 @@ cuRobo 适配器
 | --- | --- |
 | `ActionSource.reset(episode_input)` / `act(observation) → action` | 专家和 Policy 共用；每次 `act` 同时产生两臂在一个控制周期内的动作，长轨迹或 action chunk 在适配器内部缓存 |
 | `Task.reset(initial_state)` / `update(world_state, dt) → TaskStatus` | 按控制周期更新任务进度，返回成功、失败及原因；不发出动作 |
-| `Environment.reset_episode(spec)` / `step(action) → observation, info` | 运行时薄封装，组装并调用 Isaac Lab 原生环境；`step` 不自动重置 |
-| `Recorder.begin(spec)` / `finish(outcome) → EpisodeRef` | 步间数据由原生记录钩子采集；`finish` 补齐结果、验收并提交一次 |
+| `Environment.reset_episode(spec)` / `step(action) → Transition` | 运行时薄封装，组装并调用 Isaac Lab 原生环境；`step` 不自动重置 |
+| `EpisodeWriter(root, spec)` / `begin(initial)` / `append(...)` / `finish(outcome)` | 唯一的写盘入口；`finish` 补齐结果、验收并提交一次 |
 | `snapshot()` / `restore(snapshot)` | 由运行时协调环境、任务、动作源和时钟；仅支持兼容的场景结构与已声明可恢复的组件 |
 
 `episode_input` 只含模型可见的任务指令、动作／观测描述及选定 Context，不直接传入完整 `EpisodeSpec`。专家额外获得只读的场景真值与规划服务；Policy 的输入选择器不暴露这些字段。技能与规划器仅返回动作或规划结果，不自行调用 `env.step()`。
@@ -265,12 +266,12 @@ cuRobo 适配器
 解析配置 → 采样与验证 → build / reset → 稳定性检查 → 冻结 EpisodeSpec
   → 初始化任务与动作源 → 保存 observation_0 与初始状态
   → 循环：动作源给出 action_t
-           → env.step(action_t)，原生钩子记录动作、控制目标与 observation_t+1
+           → env.step(action_t)，返回控制目标与 observation_t+1，由 Runner 统一记录
            → Task.update，Runner 判断继续 / 成功 / 失败 / 超时
   → 保存终止状态与结果 → 校验并提交 Episode → reset 或 close
 ```
 
-这里的 Recorder 是记录桥接器与数据写入器的组合。桥接器显式配置导出策略，接入开始、结束和中断处理；Runner 不再逐步写入一份相同轨迹。本地 Recorder 的 `record_pre_reset()` 默认从 `termination_manager` 取成功标记，基础环境没有该管理器。接入时需在结束流程中显式设置任务结果并导出，关闭默认的 reset 自动导出，防止错误成功标记、重复导出和末回合遗漏。具体钩子顺序在阶段 A 验证。
+当前 Runner 在每次环境控制步之后，将输入动作、处理后目标和末帧交给 `EpisodeWriter` 一次。后续 Isaac Lab 记录桥接负责通过原生钩子获得控制目标与观测，不增加第二条写盘路径。原生 Recorder 默认的 reset 和 close 导出应关闭，由 LOOM 的独立任务判据与显式 `finish` 提交轨迹。本地 `record_pre_reset()` 默认从 `termination_manager` 取成功标记，基础环境没有该管理器；不能把这一默认行为当作任务验收。具体钩子顺序仍需在真实仿真中验证。
 
 专家重试耗尽、策略调用失败、数据写入失败都返回结构化原因；已经发生的任务交互尽量保留。未通过完整性检查的文件不发布到有效 Episode 索引，失败尝试另有运行日志。初始化阶段的稳定化步进不计入轨迹。
 
@@ -315,7 +316,7 @@ Episode
 - 区分 `success`、`task_failure`、`timeout`、`invalid_setup`、`runtime_error`。
 - 元数据、仿真真值和模型可见字段分开管理。
 
-第一版优先复用 Isaac Lab Recorder 的生命周期及 HDF5 导出能力，补充 JSON manifest 与索引。图像／视频存储方式在原型吞吐量测量后确定，导出为模型所需格式由独立适配器完成。
+基础实现采用 `h5py` 维护一套 LOOM Episode 格式，每个 episode 独立写入 HDF5 和 JSON manifest，校验后通过目录重命名发布，索引从已提交 manifest 重建。这满足离线读取与中断隔离要求，无需导入 Isaac Lab，也不再并行维护原生 HDF5 导出文件。原生 Recorder 的采集钩子在仿真接入阶段验证。当前 RGB 可内嵌 HDF5；图像／视频存储优化在原型吞吐量测量后确定，模型格式导出由独立适配器完成。
 
 原始轨迹提交后保持不可变，派生的模态转换、摘要、Context 配对和数据集版本保留来源引用。数据写入完成并通过完整性检查后再发布到索引，避免中断文件被当作有效 episode。
 
@@ -385,7 +386,7 @@ loom-env/
 └── tests/
 ```
 
-业务模块是拟定结构，尚未实现；已建立 `pyproject.toml`、最小 `src/loom_env/__init__.py` 包入口及环境安装说明与检查脚本。大型资产和数据使用可配置的外部目录。
+以上目录是目标结构。已实现 `specs`、`data`、`runtime` 的基础接口与 Runner、`tasks/place.py`，以及配置预设、离线检查入口和自动化测试；已提供独立的真实双 Panda 运动诊断入口；正式任务环境组装、场景采样、专家、Context 和评测模块尚未实现。当前可运行命令及实现边界见 [实现说明](implementation.md)。大型资产和数据使用可配置的外部目录。
 
 首版每个模块从少量文件开始：`runtime/protocols.py` 定义接口，`runtime/build.py` 转换配置并创建环境，`runtime/runner.py` 调度回合，`runtime/recording.py` 对接原生钩子，`experts/curobo.py` 封装规划库。机器人 USD、关节／末端映射、控制与传感器预设属于 `embodiments`；场景对象实例的创建统一由运行时根据配置完成。
 
@@ -412,7 +413,7 @@ loom-env/
 
 验收重点是动作／观测对齐、规划与任务成功的独立判断、完整 Episode 元数据，以及中断后可识别的不完整数据。
 
-首个原型从计划使用的双 6 或双 7 自由度本体中选择一种，具体型号与夹爪待定；建议先使用桌面刚体抓取放置、固定相机和关节位置控制，验证 cuRobo 到双臂仿真的动作链路。两臂都要通过关节／TCP 映射、另一臂保持、臂间碰撞和共同时间轴检查；模型最终动作空间仍按研究需求选择。验收至少覆盖一次成功、一次任务失败或超时，以及一次写入中断：有 T 个动作的有效轨迹应保存 T+1 个控制时刻观测；最后一帧来自终止场景；多频率图像通过时间戳及有效性关联。
+首个原型从计划使用的双 6 或双 7 自由度本体中选择一种，当前示例暂选双 Panda 与平行夹爪，具体选择和安装需确认；建议先使用桌面刚体抓取放置、固定相机和关节位置控制，验证 cuRobo 到双臂仿真的动作链路。两臂都要通过关节／TCP 映射、另一臂保持、臂间碰撞和共同时间轴检查；模型最终动作空间仍按研究需求选择。验收至少覆盖一次成功、一次任务失败或超时，以及一次写入中断：有 T 个动作的有效轨迹应保存 T+1 个控制时刻观测；最后一帧来自终止场景；多频率图像通过时间戳及有效性关联。
 
 ### 阶段 B：模块边界与跨部署验证
 

@@ -1,0 +1,13 @@
+id: put_cube_in_container
+instruction: 将桌面上的方块放入容器，然后松开夹爪。
+roles:
+  target_object: graspable_object
+  container: receptacle
+required_capabilities: [grasp, place]
+parameters:
+  object_size: [0.04, 0.04, 0.04]
+  region_size: [0.14, 0.14, 0.10]
+  settle_time: 0.25
+  max_linear_speed: 0.02
+  max_angular_speed: 0.1
+  failure_height: 0.6
