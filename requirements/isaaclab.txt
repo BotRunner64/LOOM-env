@@ -1,8 +1,0 @@
-# Source locations only; required package versions are declared in pyproject.toml.
-# The installer checks the pinned Lab commit and applies patches/ before pip runs.
-# Run from the project root and keep .deps/IsaacLab while using this environment.
--e ./.deps/IsaacLab/source/isaaclab
--e ./.deps/IsaacLab/source/isaaclab_assets
--e ./.deps/IsaacLab/source/isaaclab_physx
--e ./.deps/IsaacLab/source/isaaclab_ov
--e ./.deps/IsaacLab/source/isaaclab_visualizers

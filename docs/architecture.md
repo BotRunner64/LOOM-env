@@ -368,8 +368,6 @@ query:   episode_B 在 t 时刻的观测及后续动作
 ```text
 loom-env/
 ├── pyproject.toml           # 项目元数据、核心／sim 依赖、开发依赖组与工具配置
-├── environment.yml          # Conda 基础环境
-├── requirements/            # Lab 源码路径与版本快照
 ├── docs/
 ├── configs/                  # 任务、部署、场景、采集与实验配置
 ├── src/loom_env/
@@ -387,7 +385,7 @@ loom-env/
 └── tests/
 ```
 
-业务模块是拟定结构，尚未实现；已建立 `pyproject.toml`、最小 `src/loom_env/__init__.py` 包入口及环境安装／检查脚本。大型资产和数据使用可配置的外部目录。
+业务模块是拟定结构，尚未实现；已建立 `pyproject.toml`、最小 `src/loom_env/__init__.py` 包入口及环境安装说明与检查脚本。大型资产和数据使用可配置的外部目录。
 
 首版每个模块从少量文件开始：`runtime/protocols.py` 定义接口，`runtime/build.py` 转换配置并创建环境，`runtime/runner.py` 调度回合，`runtime/recording.py` 对接原生钩子，`experts/curobo.py` 封装规划库。机器人 USD、关节／末端映射、控制与传感器预设属于 `embodiments`；场景对象实例的创建统一由运行时根据配置完成。
 

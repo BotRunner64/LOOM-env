@@ -21,8 +21,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Use scripts/install_deps.sh to provide the patched, editable Isaac Lab source
-# and the NVIDIA/PyTorch package indexes before resolving this extra.
+# Install with the patched local Isaac Lab packages and NVIDIA/PyTorch indexes.
+# See docs/environment.md for the direct pip command.
 sim = [
     "torch==2.11.0+cu128",
     "torchvision==0.26.0+cu128",
@@ -42,8 +42,6 @@ sim = [
 
 [dependency-groups]
 dev = ["pytest==8.4.2", "ruff==0.13.1"]
-# Additional build prerequisites for the Lab/cuRobo source distributions.
-bootstrap = ["setuptools-scm==8.3.1", "packaging==26.0", "toml==0.10.2"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
