@@ -30,21 +30,42 @@ bash scripts/install_deps.sh
 
 若 shell 尚未初始化 Conda，先执行 `source "$(conda info --base)/etc/profile.d/conda.sh"`。当前机器已创建该环境时，从激活命令开始即可。
 
-`environment.yml` 创建 Conda 基础环境；安装脚本检查 Python 版本，获取固定 Lab 标签、应用兼容补丁，安装 PyTorch、仿真和开发依赖，最后执行 `pip check`。安装中断后可重跑。已有 `.deps/IsaacLab` 必须匹配指定提交，脚本不会替换其他版本的源码。
+`environment.yml` 创建 Conda 基础环境（pip >=25.1）；安装脚本检查 Python 版本，获取固定 Lab 标签、应用兼容补丁，从 `pyproject.toml` 读取构建依赖和 PyTorch 版本，再以 editable 方式安装本项目的 `sim` extra 与 `dev` 依赖组，最后执行 `pip check`。安装中断后可重跑。已有 `.deps/IsaacLab` 必须匹配指定提交，脚本不会替换其他版本的源码。
 
 Conda 使用 `conda-forge` 并排除默认渠道。安装脚本仅对当前进程使用官方 PyPI、PyTorch 和 NVIDIA 索引，不修改全局 pip 配置。环境设置 `PYTHONNOUSERSITE=1`，避免用户目录下其他项目的包干扰。
 
 Lab 从本项目 `.deps/IsaacLab` editable 安装核心、资产配置、PhysX、Omniverse 与可视化接口。请保留该目录；它不提交进仓库。未安装 Lab 的额外训练框架、遥操作套件或任务集合。Isaac Sim 自身依赖中包含的 Newton 等包会正常安装，运行检查显式选择 PhysX。
 
-## 依赖文件与兼容补丁
+## 依赖声明、环境与锁定
 
-- `requirements/base.txt`：配置、数值计算、HDF5 和图像读写，可单独用于离线数据处理。
-- `requirements/simulation.txt`：Sim、Lab 模块、cuRobo 与基础数据依赖。
-- `requirements/constraints.txt`：当前仿真组合的版本约束。
-- `requirements/dev.txt`：pytest 和 Ruff。
-- `requirements/pip-linux-64.lock`：本机安装的全部 Python 包及版本，Lab 使用可移植的项目内路径。
-- `requirements/conda-linux-64.lock`：Python 和 Conda 基础包的精确构建记录。
-- `patches/isaaclab-sim601-coverage.patch`：可审查的上游依赖兼容修改。
+`pyproject.toml` 是项目元数据、直接依赖和开发工具配置的统一入口，采用 [PyPA 标准项目配置](https://packaging.python.org/en/latest/guides/writing-pyproject-toml/)。它声明项目需要什么；Conda 管理基础环境，版本快照记录一次经过验证的完整安装结果。
+
+| 位置 | 职责 |
+| --- | --- |
+| `pyproject.toml` 的 `[project]` | 包名、版本、Python 范围，配置／数值／HDF5／图像读写等核心依赖 |
+| `[project.optional-dependencies].sim` | PyTorch、Sim、Lab 子包、Warp 和 cuRobo；用于完整仿真环境 |
+| `[dependency-groups].dev` | pytest 和 Ruff，使用 `pip install --group dev` 安装 |
+| `[build-system]` / `[dependency-groups].bootstrap` | 本项目构建后端、Lab 与 cuRobo 源码构建所需工具 |
+| `[tool.ruff]` | Python 版本、格式与检查范围 |
+| `environment.yml` | Conda 的 Python、pip 和环境变量 |
+| `requirements/isaaclab.txt` | 已检出的 Lab editable 路径，不重复维护依赖版本 |
+| `requirements/pip-linux-64.lock` | 全部 Python 包的版本快照，包含本项目与 Lab 的可移植 editable 路径 |
+| `requirements/conda-linux-64.lock` | Python 和 Conda 基础包的精确构建记录 |
+| `scripts/install_deps.sh` / `patches/` | 包索引选择、Lab 固定提交与安装前兼容补丁 |
+
+直接依赖在 `pyproject.toml` 中维护，原来的 `base.txt`、`simulation.txt`、`dev.txt` 和 `constraints.txt` 已移除。变更依赖后运行安装与相关检查，再更新完整版本快照。`.lock` 文件当前采用 pip requirements / Conda explicit 格式，不是 uv 或 Poetry 的锁定格式。
+
+仅做离线数据处理或开发基础模块时，在 Python 3.12 环境中执行：
+
+```bash
+python -m pip install -e .
+# 需要开发工具时添加 dev 依赖组；要求 pip >=25.1。
+python -m pip install --group dev
+```
+
+默认安装只包含核心依赖，`import loom_env` 不加载 Isaac Sim、cuRobo 或启动仿真。源码位于 `src/loom_env/`，当前只有最小包入口，任务框架仍未实现。
+
+完整仿真使用上节的安装脚本，它会为 `sim` extra 提供正确的 CUDA wheel 索引与打过补丁的 Lab 源码；普通包元数据不负责检出源码和应用补丁。
 
 所选 Lab 标签要求 `coverage==7.6.1`，而发布的 Sim 6.0.1 kernel wheel 要求 `coverage==7.4.4`。补丁只将 Lab 对测试覆盖率工具的约束放宽为 `>=7.4.4,<8`，最终由 Sim 固定到 7.4.4。补丁在安装前应用到源码；不改仿真逻辑，也不直接修改已安装包的元数据。安装保留正常依赖解析并要求 `pip check` 通过。升级 Lab 后需重新评估、移除或更新此补丁。
 
@@ -121,3 +142,11 @@ python scripts/check_env.py --curobo --sim
 ```
 
 本机验证报告位于 `.cache/checks/report.json`，日志为 `pip-check.log`、`curobo.log`、`simulation.log`，图像为 `simulation-rgb.png`。这些运行产物不提交到仓库；依赖版本和验证步骤已保存在上述配置与文档中。
+
+### pyproject 迁移验证
+
+2026-09-08 已通过新的安装脚本将本项目以 `loom-env==0.1.0.dev0` editable 安装。迁移前后的已安装包版本对比显示：仅新增本项目，既有仿真与数据依赖版本全部一致。
+
+新流程的 `pip check`、基础数据读写与 CUDA 检查通过；wheel 构建成功，并在不含 torch、Isaac Sim、Isaac Lab、cuRobo 的独立临时环境中完成 wheel 安装和 `import loom_env` 检查。该 wheel 导入检查不加载业务模块；完整数据依赖已在主环境验证。含本项目 `sim` extra 的版本快照也已通过正常依赖解析。Ruff 检查、格式检查和 Bash 语法检查通过。
+
+迁移日志位于 `.cache/setup/pyproject-*.log`，基础运行检查位于 `.cache/checks/pyproject/`。此前的 PhysX／RTX 实测记录保留在上一节。

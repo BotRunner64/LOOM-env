@@ -7,8 +7,8 @@ if (( $# > 1 )); then
     exit 2
 fi
 case "${1:-}" in
-    "") LOOM_REQUIREMENTS=requirements/simulation.txt ;;
-    --locked) LOOM_REQUIREMENTS=requirements/pip-linux-64.lock ;;
+    "") LOOM_INSTALL_ARGS=(-e ".[sim]" -r requirements/isaaclab.txt) ;;
+    --locked) LOOM_INSTALL_ARGS=(-r requirements/pip-linux-64.lock) ;;
     *) echo "Usage: bash scripts/install_deps.sh [--locked]" >&2; exit 2 ;;
 esac
 python - <<'PY'
@@ -40,10 +40,32 @@ else
     git -C "$LOOM_LAB_DIR" apply --check "$LOOM_PATCH"
     git -C "$LOOM_LAB_DIR" apply "$LOOM_PATCH"
 fi
-python -m pip install 'setuptools==80.9.0' 'wheel==0.45.1' 'setuptools-scm==8.3.1' 'packaging==26.0' 'toml==0.10.2'
-python -m pip install 'torch==2.11.0+cu128' 'torchvision==0.26.0+cu128' 'torchaudio==2.11.0+cu128' \
-    -c requirements/constraints.txt --index-url https://download.pytorch.org/whl/cu128
-python -m pip install --no-build-isolation -r "$LOOM_REQUIREMENTS" \
-    --extra-index-url https://pypi.nvidia.com
-python -m pip install -c requirements/constraints.txt -r requirements/dev.txt
+# Read build prerequisites and CUDA package versions from the project manifest.
+python - <<'PY'
+import subprocess
+import sys
+import tomllib
+from pathlib import Path
+
+config = tomllib.loads(Path("pyproject.toml").read_text())
+bootstrap = config["build-system"]["requires"] + config["dependency-groups"]["bootstrap"]
+subprocess.run([sys.executable, "-m", "pip", "install", *bootstrap], check=True)
+
+from packaging.requirements import Requirement
+
+torch_names = {"torch", "torchvision", "torchaudio"}
+torch_requirements = [
+    item for item in config["project"]["optional-dependencies"]["sim"]
+    if Requirement(item).name in torch_names
+]
+if {Requirement(item).name for item in torch_requirements} != torch_names:
+    raise SystemExit("The sim extra must declare torch, torchvision and torchaudio.")
+subprocess.run(
+    [sys.executable, "-m", "pip", "install", *torch_requirements,
+     "--index-url", "https://download.pytorch.org/whl/cu128"],
+    check=True,
+)
+PY
+python -m pip install --no-build-isolation \
+    "${LOOM_INSTALL_ARGS[@]}" --group dev --extra-index-url https://pypi.nvidia.com
 python -m pip check

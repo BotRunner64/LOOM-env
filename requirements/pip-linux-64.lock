@@ -3,7 +3,7 @@
 --index-url https://pypi.org/simple
 --extra-index-url https://download.pytorch.org/whl/cu128
 --extra-index-url https://pypi.nvidia.com
--c constraints.txt
+-e .[sim]
 
 absl-py==2.4.0
 aioboto3==15.5.0

@@ -7,28 +7,37 @@ import argparse
 import importlib.metadata
 import json
 import os
+import platform
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import time
+import tomllib
+
+from packaging.requirements import Requirement
+from packaging.specifiers import SpecifierSet
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def versions_check(packages):
-    if sys.version_info[:2] != (3, 12):
-        raise RuntimeError(f"Expected Python 3.12, got {sys.version_info[:2]}")
-    missing = [name for name, version in packages.items() if version is None]
-    if missing:
-        raise RuntimeError(f"Missing packages: {missing}")
-    if packages["isaacsim"] != "6.0.1.0":
-        raise RuntimeError(f"Expected Isaac Sim 6.0.1.0, got {packages['isaacsim']}")
-    if packages["torch"] != "2.11.0+cu128":
-        raise RuntimeError(f"Unexpected PyTorch build: {packages['torch']}")
-    return (
-        "Python 3.12, Sim 6.0.1, PyTorch 2.11 CUDA 12.8 and required packages present"
-    )
+def versions_check(packages, requirements, requires_python):
+    if platform.python_version() not in SpecifierSet(requires_python):
+        raise RuntimeError(
+            f"Expected Python {requires_python}, got {platform.python_version()}"
+        )
+    errors = []
+    for requirement in requirements:
+        version = packages[requirement.name]
+        if version is None:
+            errors.append(f"Missing package: {requirement.name}")
+        elif version not in requirement.specifier:
+            errors.append(
+                f"{requirement.name}: expected {requirement.specifier}, got {version}"
+            )
+    if errors:
+        raise RuntimeError("; ".join(errors))
+    return "Python and declared project dependencies match pyproject.toml"
 
 
 def data_check():
@@ -57,8 +66,6 @@ def cuda_check():
 
     if not torch.cuda.is_available():
         raise RuntimeError("PyTorch cannot access a CUDA GPU")
-    if torch.version.cuda != "12.8":
-        raise RuntimeError(f"Expected CUDA 12.8 PyTorch, got {torch.version.cuda}")
     values = torch.arange(16, dtype=torch.float32, device="cuda").reshape(4, 4)
     actual = (values @ values.T).cpu()
     torch.testing.assert_close(actual, values.cpu() @ values.cpu().T)
@@ -103,28 +110,29 @@ def main():
     args = parser.parse_args()
     args.output_dir.mkdir(parents=True, exist_ok=True)
     report = {"python": sys.version, "prefix": sys.prefix, "packages": {}, "checks": {}}
-    packages = [
-        "numpy",
-        "torch",
-        "torchvision",
-        "isaacsim",
-        "isaaclab",
-        "nvidia-curobo",
-        "warp-lang",
-        "cuda-core",
-        "h5py",
-        "isaaclab-physx",
-        "isaaclab-ov",
-        "isaaclab-assets",
-        "isaaclab-visualizers",
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]
+    declarations = [
+        f"{project['name']}=={project['version']}",
+        *project["dependencies"],
+        *project["optional-dependencies"]["sim"],
     ]
-    for name in packages:
+    requirements = [Requirement(value) for value in declarations]
+    requirements = [
+        requirement
+        for requirement in requirements
+        if requirement.marker is None or requirement.marker.evaluate({"extra": "sim"})
+    ]
+    for requirement in requirements:
         try:
-            report["packages"][name] = importlib.metadata.version(name)
+            report["packages"][requirement.name] = importlib.metadata.version(
+                requirement.name
+            )
         except importlib.metadata.PackageNotFoundError:
-            report["packages"][name] = None
+            report["packages"][requirement.name] = None
     checks = {
-        "versions": lambda: versions_check(report["packages"]),
+        "versions": lambda: versions_check(
+            report["packages"], requirements, project["requires-python"]
+        ),
         "pip": lambda: child_check(
             "pip-check", [sys.executable, "-m", "pip", "check"], 120, args.output_dir
         ),

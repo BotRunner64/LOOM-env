@@ -4,7 +4,7 @@ channels:
   - nodefaults
 dependencies:
   - python=3.12
-  - pip
+  - pip>=25.1
 variables:
   PYTHONNOUSERSITE: "1"
   PIP_USER: "0"

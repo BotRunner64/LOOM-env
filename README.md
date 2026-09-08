@@ -11,6 +11,8 @@
 - [架构设计与实现计划](docs/architecture.md)：模块边界、核心数据协议、cuRobo 专家生成、状态恢复、Context 实验和分阶段验收。
 - [环境安装与验证](docs/environment.md)：Conda 环境、固定依赖组合、安装脚本和 GPU／仿真检查。
 
+依赖统一在 [pyproject.toml](pyproject.toml) 声明：核心依赖、`sim` 可选依赖和 `dev` 开发依赖组。Conda 提供 Python 环境，完整版本快照保留在 `requirements/`。
+
 ```bash
 conda env create -f environment.yml
 conda activate loom-env
