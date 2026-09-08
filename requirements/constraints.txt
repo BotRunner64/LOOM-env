@@ -1,0 +1,26 @@
+# Linux x86_64 / Python 3.12 / Isaac Sim 6.0.1.
+# Match the published isaacsim-core wheel metadata, not the root Lab dev extra.
+torch==2.11.0+cu128
+torchvision==0.26.0+cu128
+torchaudio==2.11.0+cu128
+numpy==2.3.1
+pillow==12.2.0
+scipy==1.17.0
+packaging==26.0
+setuptools==80.9.0
+wheel==0.45.1
+setuptools-scm==8.3.1
+filelock==3.25.2
+typing-extensions==4.12.2
+fsspec==2026.2.0
+networkx==3.6.1
+sympy==1.14.0
+warp-lang==1.13.0
+transformers==4.57.6
+huggingface-hub<1.0
+onnx==1.20.1
+pytest==8.4.2
+# Isaac Sim and the selected Lab source tag disagree on this test-only pin.
+# The checked-in source patch lets the simulator's required version win.
+coverage==7.4.4
+pydantic>=2.7,<2.12

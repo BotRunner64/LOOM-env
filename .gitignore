@@ -1,0 +1,16 @@
+# Local environments, downloaded assets, caches and run artifacts.
+.cache/
+.deps/
+.conda/
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+build/
+dist/
+outputs/
+logs/
+core
+core.*

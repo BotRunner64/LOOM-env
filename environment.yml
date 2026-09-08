@@ -1,0 +1,10 @@
+name: loom-env
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python=3.12
+  - pip
+variables:
+  PYTHONNOUSERSITE: "1"
+  PIP_USER: "0"

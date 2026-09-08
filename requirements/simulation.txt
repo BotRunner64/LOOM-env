@@ -1,0 +1,12 @@
+-c constraints.txt
+-r base.txt
+isaacsim[all,extscache]==6.0.1.0
+# The installer checks out the exact Lab release commit and applies patches/.
+# Run from the project root. Keep .deps/IsaacLab while this environment is used.
+-e ./.deps/IsaacLab/source/isaaclab
+-e ./.deps/IsaacLab/source/isaaclab_assets
+-e ./.deps/IsaacLab/source/isaaclab_physx
+-e ./.deps/IsaacLab/source/isaaclab_ov
+-e ./.deps/IsaacLab/source/isaaclab_visualizers
+# cuRobo v2 API: stable release v0.8.0, pinned to its exact commit.
+nvidia-curobo[cu12] @ git+https://github.com/NVlabs/curobo.git@4ea77366ca48ee453e7df139e39fa6532af49f3b
