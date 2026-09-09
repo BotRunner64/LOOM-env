@@ -1,4 +1,4 @@
-# Protocol preset; USD joint/TCP mappings and reachability still need simulation validation.
+# Joint/TCP mappings passed physics and FK checks; task reachability remains to be validated.
 # Limits: the Franka URDF shipped with the pinned cuRobo version.
 id: dual_panda_tabletop
 control_type: joint_position

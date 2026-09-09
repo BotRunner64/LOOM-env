@@ -6,8 +6,9 @@
 
 技术路线：**Isaac Lab → Isaac Sim → PhysX**。专家轨迹采用 **任务状态机 + cuRobo 运动规划 + 仿真执行验证**。
 
-已实现阶段 A 的基础链路：配置与双臂动作协议、统一 Runner、放置任务检查器、HDF5 轨迹记录与离线读取。基础模块已通过自动化测试；Isaac Sim 6.0.1 的 GPU PhysX、RGB 渲染及 cuRobo 基础环境检查也已通过。另已提供真实双 Panda 关节运动录制和视频导出入口；正式的 ManagerBasedEnv 抓取场景、cuRobo 专家和物理重放仍待接入，尚未完成抓取放置仿真闭环。
+已实现阶段 A 的基础链路：配置与双臂动作协议、统一 Runner、放置任务检查器、HDF5 轨迹记录与离线读取。基础模块已通过自动化测试；Isaac Sim 6.0.1 的 GPU PhysX、RGB 渲染及 cuRobo 基础环境检查也已通过。另已提供共用的双 Panda／双 Piper 关节运动录制、末端运动学检查和视频导出入口；正式的 ManagerBasedEnv 抓取场景、cuRobo 专家和物理重放仍待接入，尚未完成抓取放置仿真闭环。
 
+- [本体支持与资产准备](docs/embodiments.md)：双 Panda／双 Piper 的资产来源、准备命令、统一接口和验证范围。
 - [当前实现与运行方式](docs/implementation.md)：基础接口、数据格式、检查命令及后续阶段 A 工作。
 - [架构设计与实现计划](docs/architecture.md)：模块边界、核心数据协议、cuRobo 专家生成、状态恢复、Context 实验和分阶段验收。
 - [环境安装与验证](docs/environment.md)：Conda 环境、pip 安装步骤和 GPU／仿真检查。
@@ -30,4 +31,4 @@ python -m pytest -q
 ruff check .
 ```
 
-示例部署暂用双 Panda，具体安装与关节／TCP 映射还需仿真验证。配置按任务、部署、场景分别维护，collection 用相对路径引用它们。
+默认 collection 使用双 Panda，运动预览通过 `--deployment configs/deployments/dual_piper.yaml` 切换为双 Piper。配置按任务、部署、场景分别维护，collection 用相对路径引用它们。大资产及转换产物放在已忽略的 `.cache/assets/` 或仓库外的共享目录。

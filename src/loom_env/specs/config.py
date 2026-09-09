@@ -456,25 +456,30 @@ def _mapping(loader, node, deep=False):
 _ConfigLoader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _mapping)
 
 
-def load_collection(path: str | Path) -> CollectionSpec:
-    """Resolve explicit task/deployment/scene file references relative to this file.
+def _read_mapping(path: Path) -> dict:
+    with path.open(encoding="utf-8") as stream:
+        value = yaml.load(stream, Loader=_ConfigLoader)
+    if not isinstance(value, dict):
+        raise ValueError(f"Expected a YAML mapping in {path}")
+    return value
 
-    References are one level deep; there is no implicit inheritance or override
-    stack. Inline definitions use the same format as standalone preset files.
-    """
+
+def load_deployment(path: str | Path) -> DeploymentSpec:
+    """Load one deployment preset without requiring simulator assets."""
     path = Path(path)
+    try:
+        return deployment_from_dict(_read_mapping(path))
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError(f"Invalid deployment config {path}: {error}") from error
 
-    def read(source):
-        with source.open(encoding="utf-8") as stream:
-            value = yaml.load(stream, Loader=_ConfigLoader)
-        if not isinstance(value, dict):
-            raise ValueError(f"Expected a YAML mapping in {source}")
-        return value
 
-    value = read(path)
+def load_collection(path: str | Path) -> CollectionSpec:
+    """Resolve one level of task/deployment/scene references relative to this file."""
+    path = Path(path)
+    value = _read_mapping(path)
     for key in ("task", "deployment", "scene"):
         if isinstance(value.get(key), str):
-            value[key] = read(path.parent / value[key])
+            value[key] = _read_mapping(path.parent / value[key])
     try:
         return collection_from_dict(value)
     except (KeyError, TypeError, ValueError) as error:
