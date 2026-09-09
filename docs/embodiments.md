@@ -5,6 +5,7 @@
 | 部署文件（`configs/deployments/`） | 每臂关节 | 夹爪物理关节 | 夹爪命令 | 双臂动作维度 | 末端测量坐标系 |
 | --- | --- | --- | --- | --- | --- |
 | `dual_panda.yaml` | 7 | 2 个移动关节 | 宽度 0–0.08 m | 16 | `panda_hand` |
+| `dual_yam.yaml` | 6 | 2 个移动关节 | 开合坐标 0–0.0939 m | 14 | `gripper` |
 | `dual_piper.yaml` | 6 | 2 个移动关节 | 宽度 0–0.08 m | 14 | `link6` |
 | `dual_x5.yaml` | 6 | 2 个移动关节 | 宽度 0–0.088 m | 14 | `link6` |
 | `dual_ur5_wsg.yaml` | 6 | 2 个移动关节 | 宽度 0.0054–0.11 m | 14 | `wrist_3_link` |
@@ -20,6 +21,7 @@
 - Panda：NVIDIA 官方 Isaac 5.1 Panda USD，沿用已验证的资产版本。
 - Piper、ARX-X5、UR5＋WSG：[RoboTwin 官方本体包](https://huggingface.co/datasets/TianxingChen/RoboTwin2.0)。X5 采用包中的 `ARX-X5/X5A.urdf`，不是 RoboDojo 的另一个 X5 v2 模型。
 - xArm6＋Robotiq：[ManiSkill-XArm6 官方模型库](https://github.com/haosulab/ManiSkill-XArm6)。
+- YAM：[I2RT 官方模型库](https://github.com/i2rt-robotics/i2rt)，MIT 许可，固定 v1.3.5 对应提交 `5b72c47239bd056d0fa6c1a39edeb0537c89443c`。使用 `i2rt/robot_models/arm/yam/v1/yam.urdf` 及其随附平行夹爪；当前接入标准版 YAM v1。独立的 `gripper/linear_4310` MJCF 与该 URDF 的指尖模型、关节坐标不同，未混用两者。
 - OpenArm：[Enactic 官方描述库](https://github.com/enactic/openarm_description) 中的 v1 模型。分别提取左右臂，以独立固定基座安装到桌面；保留两侧不同的关节限位，不包含原模型的躯干。
 
 源模型的限位、惯性和关节坐标用于仿真，尚未对齐特定实机或固件。X5 模型的前五个关节包含 ±10 rad 的宽限位；诊断轨迹只在初态附近运动。夹爪命令表示模型中的开合坐标，Robotiq 的旋转坐标不能直接当作米制指尖距离。
@@ -30,6 +32,7 @@
 .cache/assets/
 ├── robotwin-<revision>/        # 下载包和按需提取的 RoboTwin 模型
 ├── xarm6-<revision>/           # 官方固定提交源码包
+├── i2rt-<revision>/            # YAM 官方固定提交源码包及 MIT 许可
 ├── openarm-<revision>/         # 官方固定提交源码包
 └── <model>/                   # 如 x5、ur5_wsg、openarm_left
     ├── <model>.urdf            # 为仿真准备的模型；上游原件保持不变
@@ -50,8 +53,8 @@ export VK_ICD_FILENAMES=/etc/vulkan/icd.d/nvidia_icd.json
 export PYTHONNOUSERSITE=1
 
 # 可指定一种或多种；openarm 同时准备左右臂。
-python scripts/prepare_assets.py x5 ur5_wsg xarm6_robotiq openarm
-# 全部本地 URDF 本体，包括 Piper；Panda 使用官方 USD，无需转换。
+python scripts/prepare_assets.py x5 ur5_wsg xarm6_robotiq openarm yam
+# 全部本地 URDF 本体，包括 Piper 和 YAM；Panda 使用官方 USD，无需转换。
 python scripts/prepare_assets.py all
 
 python scripts/preview_motion.py \
@@ -67,7 +70,7 @@ python scripts/check_kinematics.py \
   outputs/x5/episodes/x5-example-001 --output outputs/x5/kinematics.json
 ```
 
-切换机器人只需更换 `--deployment`。再次录制使用新的 episode ID，已有 episode 不覆盖。自定义资产目录时，准备、预览和运动学检查三个入口传入同一个 `--asset-root`。单独准备 Piper 使用 `python scripts/prepare_assets.py piper`。
+切换机器人只需更换 `--deployment`。再次录制使用新的 episode ID，已有 episode 不覆盖。自定义资产目录时，准备、预览和运动学检查三个入口传入同一个 `--asset-root`。单独准备 Piper 使用 `python scripts/prepare_assets.py piper`。YAM 使用 `python scripts/prepare_assets.py yam`，预览时传入 `--deployment configs/deployments/dual_yam.yaml`。
 
 准备入口先验证下载包，再处理模型并调用 Isaac Lab 自带的 `convert_urdf.py`。每次转换使用空的临时目录，成功后替换对应模型的生成物。运行前校验上游 URDF、准备后的 URDF、导出网格和全部 USD 生成文件；旧版本缓存需重新准备。移动缓存目录后也应重新准备，因为中间 URDF 使用本地网格绝对路径。
 
@@ -78,6 +81,7 @@ python scripts/check_kinematics.py \
 - 当前 URDF 导入器会丢失 GLB 外观。准备入口用固定版本 Trimesh 将 GLB 转成带材质的 OBJ，保留子网格及节点变换；转换后及仿真启动时都检查每个刚体是否具有可见网格，避免只有碰撞几何却看不到本体。
 - UR5 源文件的夹爪关节含重复 `<limit>`；保留第一份完整定义，避免不同解析器得到不同结果。左右指使用 `[-0.5, +0.5]` 的宽度映射。
 - Robotiq 源 URDF 是开链模型，ManiSkill 另在 SAPIEN 中添加四杆闭环约束。本实现用五条理想平行连杆 mimic 关系表达对应角度约束，仅驱动主关节；从动关节的 PD 为零。其轻型连杆在源 URDF 的 1000 N·m 上限下会发生数值失稳，诊断采用 1 N·m 夹爪力矩上限和 0.001 kg·m² 关节转动惯量，参数属于仿真控制配置。沿用 ManiSkill 对夹爪内部及相邻腕部的碰撞排除，保留与外部物体及其他机械臂的碰撞。夹爪的接触抓持能力还需完整任务验证。
+- YAM 保留官方 URDF 的关节轴、惯性、位置限位和随附夹爪。源文件只有外观网格，准备入口使用相同网格及局部变换补充碰撞几何：连杆和夹爪壳体使用凸包，两指使用 PhysX 原生凸分解，保留外部接触面的凹陷。单凸包造成指间约 492 N 的内部干涉；凸分解后仍存在指间接触与抖动，因此沿用官方平行夹爪 MJCF 的指间排除规则，仅过滤 `tip_left`／`tip_right`，保留它们与物体、其他连杆和另一臂的碰撞。夹爪零位为张开，两个关节范围均为约 `[-0.04695, 0]` m，命令映射为 `q7 = q8 = width / 2 - 0.04695`。因此 `width` 表示模型开合坐标，尚未标定为实机指尖距离。末端测量使用 `gripper` 刚体坐标系。诊断沿用该 URDF 的 1 N·m 机械臂力矩、1 N 夹爪力和 1 rad/s／m/s 速度上限；这些导出模型中的数值不代表已校验的实机驱动参数。
 - OpenArm 保留左右臂各自的模型和原生夹爪 mimic，按部署中的安装位姿分别生成。当前凸包碰撞模型在腕部 `link5`／`link7` 间产生内部干涉，接触诊断测得约 3.1 kN 的非预期力；只排除该碰撞对，其余自碰撞及外部碰撞保持启用。当前左爪的指间碰撞在开合坐标约 0.015 m 时发生，左侧命令下限据此设为 0.016 m，右侧保持 0 m。这是当前仿真资产的可达控制范围，不是实机指尖距离标定值。
 
 `DualArmArticulation` 提供 `initialize()`、`reset(command)`、`submit(command)`、`observe()`、`write_data_to_sim()` 和 `update(dt)`；调用方拥有物理时钟。启动时校验关节顺序、限位、夹爪映射、末端刚体、固定基座和碰撞几何。两臂命令在写入前一起校验。
@@ -94,7 +98,7 @@ python scripts/check_kinematics.py \
 
 ## 本轮验证结果（2026-09-09）
 
-六类本体均完成 12 秒物理运动诊断、运动后重置复验、241 帧 FK／夹爪耦合检查和视频导出，全部通过。下表取左右臂中误差较大或行程较小的一侧；夹爪行程相对于各自声明的控制范围计算。
+七类本体均完成 12 秒物理运动诊断、运动后重置复验、241 帧 FK／夹爪耦合检查和视频导出，全部通过。下表取左右臂中误差较大或行程较小的一侧；夹爪行程相对于各自声明的控制范围计算。
 
 | 本体 | 保持臂最大误差（rad） | 最终关节误差（rad） | 最大 FK 位置差（mm） | 最小夹爪行程比例 |
 | --- | ---: | ---: | ---: | ---: |
@@ -104,13 +108,15 @@ python scripts/check_kinematics.py \
 | UR5＋WSG | 0.00367 | 9.54e-06 | 0.00065 | 99.38% |
 | xArm6＋Robotiq | 0.00272 | 9.20e-06 | 0.00049 | 99.05% |
 | OpenArm | 0.00503 | 7.44e-06 | 0.00044 | 99.34% |
+| YAM v1 | 0.00505 | 1.03e-05 | 0.00040 | 99.35% |
 
-本轮另有 70 项单元测试通过，Ruff 检查及格式检查通过。结果均为上述仿真配置下的运动诊断，不代表完成抓取任务或实机性能验证。
+加入 YAM 后，72 项单元测试通过，Ruff 检查及格式检查通过。结果均为上述仿真配置下的运动诊断，不代表完成抓取任务或实机性能验证。
 
 本地验证产物位于 Git 忽略的 `outputs/embodiments/`：
 
 - [四类新本体同屏视频](../outputs/embodiments/other-robots-motion.mp4)：ARX-X5、UR5＋WSG、xArm6＋Robotiq、OpenArm，20 fps、241 帧。
-- `<name>/motion-003.mp4`：各本体完整视频。
-- `<name>/dual-<name>-final-003-report.json` 和 `<name>/fk-003.json`：物理运动、重置及 FK／夹爪耦合报告。
-- `<name>/episodes/dual-<name>-final-003/`：部署快照与 HDF5 轨迹。
-- `validation-final.json`、`video-validation.json`：各阶段退出状态与视频解码检查。
+- `<name>/motion-003.mp4`：各本体完整视频；[双 YAM 视频](../outputs/embodiments/yam/motion-003.mp4)。
+- 原六类本体的 `<name>/dual-<name>-final-003-report.json` 和 `<name>/fk-003.json`：物理运动、重置及 FK／夹爪耦合报告。
+- 原六类本体的 `<name>/episodes/dual-<name>-final-003/`：部署快照与 HDF5 轨迹。
+- `validation-final.json`、`video-validation.json`：原六类本体的各阶段退出状态与视频解码检查。
+- `yam/dual-yam-motion-003-report.json`、`yam/fk-003.json`、`yam/video-validation.json`：YAM 物理运动、重置、运动学和视频检查；轨迹位于 `yam/episodes/dual-yam-motion-003/`。`yam/contacts-001.json`、`yam/contacts-002.json` 保留修正前的指间干涉诊断。

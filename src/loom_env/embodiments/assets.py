@@ -12,6 +12,13 @@ PANDA_USD = (
 )
 PANDA_VERSION = "Isaac-assets-5.1"
 SOURCES = {
+    "i2rt": {
+        "repository": "https://github.com/i2rt-robotics/i2rt",
+        "revision": "5b72c47239bd056d0fa6c1a39edeb0537c89443c",
+        "archive": "i2rt.zip",
+        "sha256": "162635cbdeaa1792313b3645a91850d4b850d13821474cb0e8b605a5a729c529",
+        "license": "MIT",
+    },
     "robotwin": {
         "repository": "https://huggingface.co/datasets/TianxingChen/RoboTwin2.0",
         "revision": "785feb15aa4a4f532395ad2b1d2be5f28cb561ad",
@@ -34,6 +41,17 @@ SOURCES = {
 # Only model-specific choices live here. Joint names, limits and deployment poses
 # belong to the deployment preset; physical effort/velocity limits come from URDF.
 MODELS = {
+    "yam": dict(
+        asset="i2rt:yam-v1",
+        source="i2rt",
+        urdf="i2rt/robot_models/arm/yam/v1/yam.urdf",
+        base="base",
+        arm_gains=(400.0, 40.0),
+        gripper_gains=(1000.0, 50.0),
+        # The finger CAD parts interfere internally even with convex decomposition.
+        # Match I2RT's parallel-gripper MJCF exclusion; keep external contacts.
+        collision_groups=(("tip_left", "tip_right"),),
+    ),
     "piper": dict(
         asset="robotwin:piper",
         source="robotwin",

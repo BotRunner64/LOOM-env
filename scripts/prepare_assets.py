@@ -2,6 +2,7 @@
 """Prepare pinned robot models in the ignored cache with Isaac Lab's URDF converter."""
 
 import argparse
+from copy import deepcopy
 import importlib.metadata
 import json
 import os
@@ -75,6 +76,17 @@ def normalize_urdf(root, name):
     robot = ET.parse(original).getroot()
     changes = []
     robot.set("name", name)
+    if name == "yam":
+        # The official Onshape URDF supplies visuals and inertias but no
+        # collision geometry. Let the standard importer convexify the same meshes.
+        for link in robot.findall("link"):
+            for visual in link.findall("visual"):
+                collision = ET.SubElement(link, "collision")
+                for tag in ("origin", "geometry"):
+                    child = visual.find(tag)
+                    if child is not None:
+                        collision.append(deepcopy(child))
+        changes.append("Use YAM visual meshes as convex collision geometry")
     if model["source"] == "openarm":
         # Official example contains torso + both arms. Keep the requested arm's
         # rooted subtree, preserving every local transform and its handed limits.
@@ -214,7 +226,29 @@ def main():
             )
             if not (converted / name / f"{name}.usda").is_file():
                 raise RuntimeError(f"Converter did not produce the expected {name} USD")
-            from pxr import Usd
+            from pxr import Usd, UsdPhysics
+
+            if name == "yam":
+                # A single hull fills the interlocking fingers' recesses and
+                # makes them collide even when fully open. Preserve their
+                # external contact surfaces with PhysX's convex decomposition.
+                instances = Usd.Stage.Open(
+                    str(converted / name / "payloads" / "instances.usda")
+                )
+                fingers = set()
+                for prim in instances.Traverse():
+                    if prim.GetName() in {"tip_left", "tip_right"} and prim.HasAPI(
+                        UsdPhysics.MeshCollisionAPI
+                    ):
+                        UsdPhysics.MeshCollisionAPI(prim).CreateApproximationAttr(
+                            "convexDecomposition"
+                        )
+                        fingers.add(prim.GetName())
+                if fingers != {"tip_left", "tip_right"}:
+                    raise ValueError("Missing YAM finger collision meshes")
+                instances.GetRootLayer().Save()
+                instances = None
+                changes.append("Use PhysX convex decomposition for both YAM fingers")
 
             stage = Usd.Stage.Open(str(converted / name / f"{name}.usda"))
             visual_counts = validate_visuals(stage.GetDefaultPrim())

@@ -25,6 +25,7 @@ ROOT = Path(__file__).resolve().parents[1]
         ("ur5_wsg", 14),
         ("xarm6_robotiq", 14),
         ("openarm", 16),
+        ("yam", 14),
     ],
 )
 def test_native_motion_layout_limits_and_stationary_arm(name, dimension):

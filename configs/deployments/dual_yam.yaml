@@ -1,0 +1,38 @@
+# I2RT YAM v1 with the parallel gripper included in the official arm URDF.
+# Source/version are pinned in embodiments/assets.py. Width is a model opening
+# coordinate: q7 = q8 = width / 2 - 0.04695, not a calibrated fingertip distance.
+id: dual_yam_tabletop
+control_type: joint_position
+control_dt: 0.05
+physics_dt: 0.008333333333333333
+capabilities: [grasp, place]
+arms:
+  left:
+    asset: &asset i2rt:yam-v1
+    joint_names: &joints [joint1, joint2, joint3, joint4, joint5, joint6]
+    joint_limits: &limits
+      - [-2.61799, 3.14159]
+      - [-8.88178e-16, 3.66519]
+      - [0.0, 3.14159]
+      - [-1.69297, 1.5708]
+      - [-1.5708, 1.5708]
+      - [-2.0944, 2.0944]
+    initial_positions: &initial [0.0, 1.0, 1.0, 0.0, 0.0, 0.0]
+    base_pose: [0.0, 0.4, 0.75, 0.0, 0.0, 0.0, 1.0]
+    tcp_frame: gripper
+    gripper: &gripper
+      joint_names: [joint7, joint8]
+      command_names: [width]
+      command_limits: [[0.0, 0.0939]]
+      unit: m
+      joint_map: [[0.5], [0.5]]
+      joint_offset: [-0.04695, -0.04695]
+  right:
+    asset: *asset
+    joint_names: *joints
+    joint_limits: *limits
+    initial_positions: *initial
+    base_pose: [0.0, -0.4, 0.75, 0.0, 0.0, 0.0, 1.0]
+    tcp_frame: gripper
+    gripper: *gripper
+cameras: []

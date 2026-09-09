@@ -13,7 +13,7 @@ ruff check .
 ruff format --check src tests scripts/inspect_data.py
 ```
 
-配置检查不启动仿真。默认 collection 使用双 Panda、20 Hz 控制与 120 Hz 物理频率；左右臂各 7 个机械臂关节，完整动作是 16 维。另提供 Piper、X5、UR5＋WSG、xArm6＋Robotiq 的双 6 关节部署（14 维动作），以及双 7 关节 OpenArm（16 维动作）。Robotiq 使用六个旋转关节和一个张开角命令，其余夹爪使用两个移动关节和一个宽度命令。运动预览共用本体适配器，并在启动时校验实际 USD 映射；完整抓取采集环境仍未实现。准备资产和切换本体见[本体文档](embodiments.md)。
+配置检查不启动仿真。默认 collection 使用双 Panda、20 Hz 控制与 120 Hz 物理频率；左右臂各 7 个机械臂关节，完整动作是 16 维。另提供 Piper、X5、UR5＋WSG、xArm6＋Robotiq、YAM 的双 6 关节部署（14 维动作），以及双 7 关节 OpenArm（16 维动作）。Robotiq 使用六个旋转关节和一个张开角命令，其余夹爪使用两个移动关节和一个宽度命令。运动预览共用本体适配器，并在启动时校验实际 USD 映射；完整抓取采集环境仍未实现。准备资产和切换本体见[本体文档](embodiments.md)。
 
 ## 已实现接口
 
@@ -23,7 +23,7 @@ ruff format --check src tests scripts/inspect_data.py
 | `specs/episode.py` | 模型观测、场景真值、处理后控制目标、事件、任务结果与模型可见输入 |
 | `runtime/protocols.py` | 环境、任务和动作源接口，不导入仿真库 |
 | `runtime/runner.py` | 显式 reset、共同控制时钟、结束判定、唯一的逐步记录入口和异常清理 |
-| `embodiments/isaac_lab.py` | 六类本体的统一生成、关节与夹爪映射、显式重置、控制和状态读取 |
+| `embodiments/isaac_lab.py` | 七类本体的统一生成、关节与夹爪映射、显式重置、控制和状态读取 |
 | `runtime/motion.py` | 按本体自由度生成运动诊断动作，独立检查各关节运动、保持误差和夹爪行程 |
 | `runtime/replay.py` | 从 Episode 读取原始输入动作的动作源，可接入相同 Runner |
 | `tasks/place.py` | 有朝向的方块完整进入容器内部区域、释放和持续静止的判据，以及跌落失败 |
