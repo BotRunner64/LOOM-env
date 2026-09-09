@@ -1,4 +1,5 @@
 # Local environments, downloaded assets, caches and run artifacts.
+# Downloaded robot/scene assets and converted USDs belong in .cache/assets/.
 .cache/
 .deps/
 .conda/
