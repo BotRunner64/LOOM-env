@@ -35,6 +35,8 @@ sim = [
     "isaaclab-ov==0.4.2",
     "isaaclab-visualizers==0.1.0",
     "warp-lang==1.13.0",
+    # Convert GLB robot visuals to OBJ for the URDF importer.
+    "trimesh==4.11.1",
     # Additional version pin for Lab's ONNX dependency.
     "onnx==1.20.1",
     "nvidia-curobo[cu12] @ git+https://github.com/NVlabs/curobo.git@4ea77366ca48ee453e7df139e39fa6532af49f3b",

@@ -1,0 +1,40 @@
+# Limits describe the pinned simulation asset; task reachability still needs validation.
+id: dual_ur5_wsg_tabletop
+control_type: joint_position
+control_dt: 0.05
+physics_dt: 0.008333333333333333
+capabilities: [grasp, place]
+arms:
+  left:
+    asset: robotwin:ur5-wsg
+    joint_names: &id001 [shoulder_pan_joint, shoulder_lift_joint, elbow_joint, wrist_1_joint,
+      wrist_2_joint, wrist_3_joint]
+    joint_limits: &id002
+    - [-3.142, 3.142]
+    - [-3.142, 0.0]
+    - [-3.142, 3.142]
+    - [-1.75, 1.75]
+    - [-3.141592653589793, 3.141592653589793]
+    - [-3.141592653589793, 3.141592653589793]
+    initial_positions: &id003 [0, -1.5, 1.5, -1.5, -1.57, 0]
+    base_pose: [0, 0.45, 0.75, 0, 0, 0, 1]
+    tcp_frame: wrist_3_link
+    gripper: &id004
+      joint_names: [base_joint_gripper_left, base_joint_gripper_right]
+      command_names: [width]
+      command_limits:
+      - [0.0054, 0.11]
+      unit: m
+      joint_map:
+      - [-0.5]
+      - [0.5]
+      joint_offset: [0, 0]
+  right:
+    asset: robotwin:ur5-wsg
+    joint_names: *id001
+    joint_limits: *id002
+    initial_positions: *id003
+    base_pose: [0, -0.45, 0.75, 0, 0, 0, 1]
+    tcp_frame: wrist_3_link
+    gripper: *id004
+cameras: []

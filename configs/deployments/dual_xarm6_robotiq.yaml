@@ -1,0 +1,44 @@
+# Limits describe the pinned simulation asset; task reachability still needs validation.
+id: dual_xarm6_robotiq_tabletop
+control_type: joint_position
+control_dt: 0.05
+physics_dt: 0.008333333333333333
+capabilities: [grasp, place]
+arms:
+  left:
+    asset: maniskill:xarm6-robotiq
+    joint_names: &id001 [joint1, joint2, joint3, joint4, joint5, joint6]
+    joint_limits: &id002
+    - [-6.28318530718, 6.28318530718]
+    - [-2.059, 2.0944]
+    - [-3.8, 0.19198]
+    - [-6.28318530718, 6.28318530718]
+    - [-1.69297, 3.14159265359]
+    - [-6.28318530718, 6.28318530718]
+    initial_positions: &id003 [0, 0.22, -1.23, 0, 1.01, 0]
+    base_pose: [0, 0.45, 0.75, 0, 0, 0, 1]
+    tcp_frame: link6
+    gripper: &id004
+      joint_names: [left_outer_knuckle_joint, left_inner_knuckle_joint, left_inner_finger_joint,
+        right_outer_knuckle_joint, right_inner_knuckle_joint, right_inner_finger_joint]
+      command_names: [opening_angle]
+      command_limits:
+      - [0, 0.81]
+      unit: rad
+      joint_map:
+      - [-1]
+      - [-1]
+      - [1]
+      - [-1]
+      - [-1]
+      - [1]
+      joint_offset: [0.81, 0.81, -0.81, 0.81, 0.81, -0.81]
+  right:
+    asset: maniskill:xarm6-robotiq
+    joint_names: *id001
+    joint_limits: *id002
+    initial_positions: *id003
+    base_pose: [0, -0.45, 0.75, 0, 0, 0, 1]
+    tcp_frame: link6
+    gripper: *id004
+cameras: []

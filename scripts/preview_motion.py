@@ -217,7 +217,15 @@ def main():
                 stable = (
                     max(errors) < 0.003
                     and max(velocities) < 0.01
-                    and max(finger_errors) < 0.0005
+                    and all(
+                        error
+                        < (
+                            0.0005
+                            if deployment.arms[side].gripper.unit == "m"
+                            else 0.003
+                        )
+                        for side, error in zip(ARMS, finger_errors)
+                    )
                     and max(finger_velocities) < 0.01
                 )
                 consecutive = consecutive + 1 if stable else 0
@@ -228,6 +236,9 @@ def main():
                         "joint_velocity_rad_s": velocities,
                         "finger_error": finger_errors,
                         "finger_velocity": finger_velocities,
+                        "finger_units": [
+                            deployment.arms[side].gripper.unit for side in ARMS
+                        ],
                     }
             raise RuntimeError(
                 f"Robot did not stabilize: errors={errors}, velocities={velocities}, finger_errors={finger_errors}"

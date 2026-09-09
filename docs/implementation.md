@@ -13,7 +13,7 @@ ruff check .
 ruff format --check src tests scripts/inspect_data.py
 ```
 
-配置检查不启动仿真。默认 collection 使用双 Panda、20 Hz 控制与 120 Hz 物理频率；左右臂各 7 个机械臂关节，完整动作是 16 维。另提供双 Piper 部署，每臂 6 个机械臂关节，完整动作是 14 维；两者夹爪均有两个物理关节和一个宽度命令。运动预览共用本体适配器，并在启动时校验实际 USD 映射；完整抓取采集环境仍未实现。准备资产和切换本体见[本体文档](embodiments.md)。
+配置检查不启动仿真。默认 collection 使用双 Panda、20 Hz 控制与 120 Hz 物理频率；左右臂各 7 个机械臂关节，完整动作是 16 维。另提供 Piper、X5、UR5＋WSG、xArm6＋Robotiq 的双 6 关节部署（14 维动作），以及双 7 关节 OpenArm（16 维动作）。Robotiq 使用六个旋转关节和一个张开角命令，其余夹爪使用两个移动关节和一个宽度命令。运动预览共用本体适配器，并在启动时校验实际 USD 映射；完整抓取采集环境仍未实现。准备资产和切换本体见[本体文档](embodiments.md)。
 
 ## 已实现接口
 
@@ -23,7 +23,7 @@ ruff format --check src tests scripts/inspect_data.py
 | `specs/episode.py` | 模型观测、场景真值、处理后控制目标、事件、任务结果与模型可见输入 |
 | `runtime/protocols.py` | 环境、任务和动作源接口，不导入仿真库 |
 | `runtime/runner.py` | 显式 reset、共同控制时钟、结束判定、唯一的逐步记录入口和异常清理 |
-| `embodiments/isaac_lab.py` | 双 Panda／双 Piper 的统一生成、关节与夹爪映射、显式重置、控制和状态读取 |
+| `embodiments/isaac_lab.py` | 六类本体的统一生成、关节与夹爪映射、显式重置、控制和状态读取 |
 | `runtime/motion.py` | 按本体自由度生成运动诊断动作，独立检查各关节运动、保持误差和夹爪行程 |
 | `runtime/replay.py` | 从 Episode 读取原始输入动作的动作源，可接入相同 Runner |
 | `tasks/place.py` | 有朝向的方块完整进入容器内部区域、释放和持续静止的判据，以及跌落失败 |
@@ -31,7 +31,7 @@ ruff format --check src tests scripts/inspect_data.py
 
 `CollectionSpec` 组合任务、部署和场景预设，并绑定对象及操作角色。`EpisodeSpec` 保存已解析的 collection、接受的初态、实际采样参数、seed、资产版本、运行版本和来源信息。它表示采样结果，不能只用 seed 或场景采样范围代替实际初态。
 
-配置文件引用仅在 collection 的 `task`、`deployment`、`scene` 三处解析，路径相对 collection 文件；也可直接内联对象。不支持隐式继承、覆盖链或任意 Python 对象加载，重复 YAML 字段和未知结构字段会报错。任务和场景专属参数由对应实现解释和校验，当前还没有场景采样器；Piper 的资产准备入口会校验下载包及生成文件，共用本体适配器校验实际模型映射。
+配置文件引用仅在 collection 的 `task`、`deployment`、`scene` 三处解析，路径相对 collection 文件；也可直接内联对象。不支持隐式继承、覆盖链或任意 Python 对象加载，重复 YAML 字段和未知结构字段会报错。任务和场景专属参数由对应实现解释和校验，当前还没有场景采样器；统一资产准备入口会校验下载包及生成文件，共用本体适配器校验实际模型映射。
 
 目前只支持绝对关节位置命令；展开顺序固定为 `left/arm → left/gripper → right/arm → right/gripper`，机械臂单位为 rad。夹爪声明自己的单位、命令维度、范围，以及命令到物理关节目标的线性映射。维度和切片从部署生成，不单独维护。越界、NaN、缺臂和错误维度直接拒绝，不自动裁剪或归一化。Pose 固定为 xyz + quaternion xyzw，长度单位 m，四元数须归一化。
 
@@ -98,7 +98,7 @@ with EpisodeReader("outputs/run/episodes/episode-001") as episode:
 
 ## 真实双臂运动测试与视频
 
-`scripts/preview_motion.py` 使用 Isaac Lab 的 `SimulationContext`、GPU PhysX 和 RTX 相机，运行双 Panda 或双 Piper 的关节运动诊断，再通过现有 `EpisodeRunner` 保存 Episode。它是独立的仿真检查入口，不是计划中的 ManagerBasedEnv 抓取放置任务环境。
+`scripts/preview_motion.py` 使用 Isaac Lab 的 `SimulationContext`、GPU PhysX 和 RTX 相机，按部署文件运行已支持本体的双臂关节运动诊断，再通过现有 `EpisodeRunner` 保存 Episode。它是独立的仿真检查入口，不是计划中的 ManagerBasedEnv 抓取放置任务环境。
 
 动作顺序为右臂全部关节运动／左臂保持、左臂全部关节运动／右臂保持、两个夹爪开合、双臂回到保持状态。固定录制 12 秒，使用示例部署的 20 Hz 控制频率、120 Hz 物理频率和 960×640 RGB。使用高刚度 PD 控制并禁用所有机器人连杆的重力，目标由平滑关节曲线给出；不调用 cuRobo，也不执行抓取。
 

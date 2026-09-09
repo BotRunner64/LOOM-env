@@ -4,14 +4,29 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from loom_env.runtime.motion import MotionCheck, MotionSource, gripper_command
+from loom_env.runtime.motion import (
+    MotionCheck,
+    MotionSource,
+    gripper_command,
+    gripper_mapping_error,
+)
 from loom_env.specs.config import load_deployment
 from loom_env.specs.episode import Observation
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
-@pytest.mark.parametrize("name,dimension", [("panda", 16), ("piper", 14)])
+@pytest.mark.parametrize(
+    "name,dimension",
+    [
+        ("panda", 16),
+        ("piper", 14),
+        ("x5", 14),
+        ("ur5_wsg", 14),
+        ("xarm6_robotiq", 14),
+        ("openarm", 16),
+    ],
+)
 def test_native_motion_layout_limits_and_stationary_arm(name, dimension):
     dep = load_deployment(ROOT / f"configs/deployments/dual_{name}.yaml")
     source = MotionSource(dep)
@@ -72,3 +87,25 @@ def test_gripper_motion_uses_configured_range():
         part = dep.action_slices[f"{side}/gripper"]
         assert source.home[part][0] == pytest.approx(0.06)
         assert closed[part][0] == pytest.approx(0.02)
+
+
+def test_native_rotary_gripper_mapping_preserves_all_six_links():
+    dep = load_deployment(ROOT / "configs/deployments/dual_xarm6_robotiq.yaml")
+    grip = dep.arms["left"].gripper
+    assert grip.unit == "rad"
+    assert len(grip.joint_names) == 6
+    for opening in (0.0, 0.4, 0.81):
+        targets = np.asarray(grip.joint_map) @ [opening] + grip.joint_offset
+        np.testing.assert_allclose(
+            targets, np.array([1, 1, -1, 1, 1, -1]) * (0.81 - opening)
+        )
+        assert gripper_command(grip, targets) == pytest.approx(opening)
+
+
+def test_linkage_check_detects_one_stuck_robotiq_joint():
+    dep = load_deployment(ROOT / "configs/deployments/dual_xarm6_robotiq.yaml")
+    grip = dep.arms["left"].gripper
+    positions = np.array([[0, 0, 0, 0, 0, 0], [0.81, 0.81, -0.81, 0.81, 0.81, -0.81]])
+    assert gripper_mapping_error(grip, positions) < 1e-12
+    positions[1, 1] = 0
+    assert gripper_mapping_error(grip, positions) > 0.6

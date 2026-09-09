@@ -1,0 +1,59 @@
+# Left/right v1 arms, mounted separately upright on the table.
+# Left finger collision meshes touch near command 0.015 m; use a reachable 0.016 m minimum.
+id: dual_openarm_tabletop
+control_type: joint_position
+control_dt: 0.05
+physics_dt: 0.008333333333333333
+capabilities: [grasp, place]
+arms:
+  left:
+    asset: enactic:openarm-left
+    joint_names: [openarm_left_joint1, openarm_left_joint2, openarm_left_joint3, openarm_left_joint4,
+      openarm_left_joint5, openarm_left_joint6, openarm_left_joint7]
+    joint_limits:
+    - [-3.490659, 1.3962629999999998]
+    - [-3.3161253267948965, 0.17453267320510335]
+    - [-1.570796, 1.570796]
+    - [0.0, 2.443461]
+    - [-1.570796, 1.570796]
+    - [-0.785398, 0.785398]
+    - [-1.570796, 1.570796]
+    initial_positions: [-0.5, -0.8, 0, 1.2, 0, 0, 0]
+    base_pose: [0, 0.45, 0.75, 0.0, 0.0, 0.0, 1.0]
+    tcp_frame: openarm_left_link7
+    gripper:
+      joint_names: [openarm_left_finger_joint1, openarm_left_finger_joint2]
+      command_names: [width]
+      command_limits:
+      - [0.016, 0.088]
+      unit: m
+      joint_map:
+      - [0.5]
+      - [0.5]
+      joint_offset: [0, 0]
+  right:
+    asset: enactic:openarm-right
+    joint_names: [openarm_right_joint1, openarm_right_joint2, openarm_right_joint3,
+      openarm_right_joint4, openarm_right_joint5, openarm_right_joint6, openarm_right_joint7]
+    joint_limits:
+    - [-1.396263, 3.490659]
+    - [-0.17453267320510335, 3.3161253267948965]
+    - [-1.570796, 1.570796]
+    - [0.0, 2.443461]
+    - [-1.570796, 1.570796]
+    - [-0.785398, 0.785398]
+    - [-1.570796, 1.570796]
+    initial_positions: [0.5, 0.8, 0, 1.2, 0, 0, 0]
+    base_pose: [0, -0.45, 0.75, 0.0, 0.0, 0.0, 1.0]
+    tcp_frame: openarm_right_link7
+    gripper:
+      joint_names: [openarm_right_finger_joint1, openarm_right_finger_joint2]
+      command_names: [width]
+      command_limits:
+      - [0, 0.088]
+      unit: m
+      joint_map:
+      - [0.5]
+      - [0.5]
+      joint_offset: [0, 0]
+cameras: []

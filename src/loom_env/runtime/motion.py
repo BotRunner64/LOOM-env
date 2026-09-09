@@ -32,6 +32,14 @@ def gripper_command(gripper, position):
     )
 
 
+def gripper_mapping_error(gripper, positions):
+    """Measure linkage consistency independently of its common command lag."""
+    matrix = np.asarray(gripper.joint_map)
+    relative = np.asarray(positions) - gripper.joint_offset
+    commands = np.linalg.lstsq(matrix, relative.T, rcond=None)[0].T
+    return np.max(np.abs(relative - commands @ matrix.T))
+
+
 class MotionSource:
     def __init__(self, deployment):
         self.deployment = deployment

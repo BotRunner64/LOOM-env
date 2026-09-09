@@ -3,35 +3,42 @@ import json
 import pytest
 
 from loom_env.embodiments.assets import (
-    PIPER_CONVERSION_ARGS,
-    PIPER_SOURCE,
-    piper_source_dir,
-    piper_usd,
+    CONVERSION_ARGS,
+    PREPARATION_VERSION,
+    SOURCES,
+    MODELS,
+    source_urdf,
+    prepared_urdf,
+    converted_usd,
     sha256,
-    verify_piper_asset,
+    verify_asset,
 )
 
 
-def test_converted_asset_verification_rejects_tampering(tmp_path):
+@pytest.mark.parametrize("name", MODELS)
+def test_converted_asset_verification_rejects_tampering(tmp_path, name):
     root = tmp_path / "assets"
-    urdf = piper_source_dir(root) / "piper.urdf"
-    usd = piper_usd(root)
-    urdf.parent.mkdir(parents=True)
-    usd.parent.mkdir(parents=True)
-    urdf.write_text('<robot name="fixture"/>')
-    usd.write_text("#usda 1.0\n")
+    original = source_urdf(root, name)
+    urdf = prepared_urdf(root, name)
+    usd = converted_usd(root, name)
+    for path in (original, urdf, usd):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("fixture")
     manifest = {
-        "source": PIPER_SOURCE,
-        "conversion": list(PIPER_CONVERSION_ARGS),
+        "source": SOURCES[MODELS[name]["source"]],
+        "conversion": list(CONVERSION_ARGS),
+        "preparation_version": PREPARATION_VERSION,
+        "prepared_mesh_files": {},
+        "source_urdf_sha256": sha256(original),
         "urdf_sha256": sha256(urdf),
         "usd_files": {str(usd.relative_to(root)): sha256(usd)},
     }
-    path = root / "piper/asset.json"
+    path = root / name / "asset.json"
     path.write_text(json.dumps(manifest))
-    assert verify_piper_asset(root) == manifest
+    assert verify_asset(root, name) == manifest
     usd.write_text("changed")
-    with pytest.raises(ValueError, match="converted asset changed"):
-        verify_piper_asset(root)
+    with pytest.raises(ValueError, match="Converted asset changed"):
+        verify_asset(root, name)
     path.unlink()
-    with pytest.raises(FileNotFoundError, match="prepare_piper"):
-        verify_piper_asset(root)
+    with pytest.raises(FileNotFoundError, match="prepare_assets"):
+        verify_asset(root, name)

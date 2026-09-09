@@ -9,8 +9,15 @@ import numpy as np
 from scipy.spatial.transform import Rotation
 
 from loom_env.data.episodes import EpisodeReader
-from loom_env.embodiments.assets import PANDA_ASSET, PIPER_ASSET, piper_source_dir
+from loom_env.embodiments.assets import (
+    PANDA_ASSET,
+    MODELS,
+    model_name,
+    prepared_urdf,
+    verify_asset,
+)
 from loom_env.specs.config import ARMS
+from loom_env.runtime.motion import gripper_mapping_error
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -37,18 +44,18 @@ def main():
     report = {"episode": str(args.episode), "samples": len(samples), "arms": {}}
     for side in ARMS:
         arm = deployment.arms[side]
-        if arm.asset == PIPER_ASSET:
-            config = KinematicsCfg.from_basic_urdf(
-                str((piper_source_dir(args.asset_root) / "piper.urdf").resolve()),
-                "base_link",
-                [arm.tcp_frame],
-            )
-        elif arm.asset == PANDA_ASSET:
+        if arm.asset == PANDA_ASSET:
             config = KinematicsCfg.from_robot_yaml_file(
                 "franka.yml", tool_frames=[arm.tcp_frame]
             )
         else:
-            raise ValueError(f"Unsupported robot asset: {arm.asset}")
+            name = model_name(arm.asset)
+            verify_asset(args.asset_root, name)
+            config = KinematicsCfg.from_basic_urdf(
+                str(prepared_urdf(args.asset_root, name).resolve()),
+                MODELS[name]["base"],
+                [arm.tcp_frame],
+            )
         robot = Kinematics(config)
         if tuple(robot.joint_names) != arm.joint_names:
             raise ValueError(f"cuRobo joint order mismatch: {robot.joint_names}")
@@ -74,16 +81,25 @@ def main():
         angle_error = (
             orientation.inv() * Rotation.from_quat(measured[:, 3:])
         ).magnitude()
+        fingers = np.stack([v[f"robot/{side}/gripper_position"] for v in samples])
+        linkage_error = float(gripper_mapping_error(arm.gripper, fingers))
+        linkage_tolerance = 0.0005 if arm.gripper.unit == "m" else 0.003
         report["arms"][side] = {
+            "gripper_mapping_error": linkage_error,
+            "gripper_mapping_tolerance": linkage_tolerance,
+            "gripper_joint_unit": arm.gripper.unit,
+            "gripper_each_joint_excursion": np.ptp(fingers, axis=0).tolist(),
             "max_position_error_m": float(position_error.max()),
             "max_orientation_error_rad": float(angle_error.max()),
             "passed": bool(
-                np.all(position_error < 1e-4) and np.all(angle_error < 1e-3)
+                np.all(position_error < 1e-4)
+                and np.all(angle_error < 1e-3)
+                and linkage_error < linkage_tolerance
             ),
         }
     report["criteria"] = {"position_m": 1e-4, "orientation_rad": 1e-3}
     report["scope"] = (
-        "FK only; collision-aware planning and grasp execution are not tested"
+        "Arm FK and gripper linkage only; collision-aware planning and grasp execution are not tested"
     )
     report["passed"] = all(v["passed"] for v in report["arms"].values())
     args.output.parent.mkdir(parents=True, exist_ok=True)

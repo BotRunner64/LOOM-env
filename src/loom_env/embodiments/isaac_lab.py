@@ -18,10 +18,15 @@ from loom_env.embodiments.assets import (
     PANDA_ASSET,
     PANDA_USD,
     PANDA_VERSION,
-    PIPER_ASSET,
-    PIPER_VERSION,
-    piper_usd,
-    verify_piper_asset,
+    MODELS,
+    SOURCES,
+    PREPARATION_VERSION,
+    model_name,
+    converted_usd,
+    prepared_urdf,
+    joint_definitions,
+    verify_asset,
+    validate_visuals,
 )
 from loom_env.specs.config import ARMS, DeploymentSpec
 
@@ -34,45 +39,57 @@ def articulation_config(arm, asset_root):
         cfg = FRANKA_PANDA_HIGH_PD_CFG.copy()
         cfg.spawn.usd_path = PANDA_USD
         version = PANDA_VERSION
-    elif arm.asset == PIPER_ASSET:
-        usd = piper_usd(asset_root).resolve()
-        if not usd.is_file():
-            raise FileNotFoundError(
-                f"Piper USD is missing: {usd}. Run scripts/prepare_piper.py first."
+    else:
+        name = model_name(arm.asset)
+        model = MODELS[name]
+        joints = joint_definitions(prepared_urdf(asset_root, name))
+        actuators = {}
+        for group, names, gains in (
+            ("arm", arm.joint_names, model["arm_gains"]),
+            ("gripper", arm.gripper.joint_names, model["gripper_gains"]),
+        ):
+            actuators[group] = ImplicitActuatorCfg(
+                joint_names_expr=list(names),
+                effort_limit_sim={
+                    n: min(
+                        float(joints[n].find("limit").get("effort")),
+                        model.get(f"{group}_effort_limit", float("inf")),
+                    )
+                    for n in names
+                },
+                armature=model.get(f"{group}_armature", 0.0),
+                velocity_limit_sim={
+                    n: min(
+                        float(joints[n].find("limit").get("velocity")),
+                        3.0 if group == "arm" else 1.0,
+                    )
+                    for n in names
+                },
+                stiffness={
+                    n: gains[0] if joints[n].find("mimic") is None else 0.0
+                    for n in names
+                },
+                damping={
+                    n: gains[1] if joints[n].find("mimic") is None else 0.0
+                    for n in names
+                },
             )
         cfg = ArticulationCfg(
             spawn=sim_utils.UsdFileCfg(
-                usd_path=str(usd),
+                usd_path=str(converted_usd(asset_root, name).resolve()),
                 rigid_props=sim_utils.RigidBodyPropertiesCfg(
                     disable_gravity=True, max_depenetration_velocity=5.0
                 ),
                 articulation_props=sim_utils.ArticulationRootPropertiesCfg(
                     enabled_self_collisions=True,
-                    solver_position_iteration_count=8,
-                    solver_velocity_iteration_count=1,
+                    solver_position_iteration_count=16,
+                    solver_velocity_iteration_count=4,
                 ),
             ),
-            actuators={
-                "arm": ImplicitActuatorCfg(
-                    joint_names_expr=list(arm.joint_names),
-                    effort_limit_sim=100.0,
-                    velocity_limit_sim=3.0,
-                    stiffness=400.0,
-                    damping=40.0,
-                ),
-                "gripper": ImplicitActuatorCfg(
-                    joint_names_expr=list(arm.gripper.joint_names),
-                    effort_limit_sim=10.0,
-                    velocity_limit_sim=1.0,
-                    stiffness=1000.0,
-                    damping=50.0,
-                ),
-            },
+            actuators=actuators,
             soft_joint_pos_limit_factor=1.0,
         )
-        version = PIPER_VERSION
-    else:
-        raise ValueError(f"Unsupported robot asset: {arm.asset}")
+        version = f"{model['source']}-{SOURCES[model['source']]['revision']}:isaac-import-v{PREPARATION_VERSION}"
     cfg.init_state.pos = arm.base_pose[:3]
     cfg.init_state.rot = arm.base_pose[3:]
     opened = np.array([high for _, high in arm.gripper.command_limits])
@@ -96,8 +113,11 @@ class DualArmArticulation:
         self.controller_parameters = {}
         self.model_checks = {}
         self.asset_manifests = {}
-        if any(arm.asset == PIPER_ASSET for arm in deployment.arms.values()):
-            self.asset_manifests[PIPER_ASSET] = verify_piper_asset(asset_root)
+        for asset in dict.fromkeys(arm.asset for arm in deployment.arms.values()):
+            if asset != PANDA_ASSET:
+                self.asset_manifests[asset] = verify_asset(
+                    asset_root, model_name(asset)
+                )
         for side in ARMS:
             arm = deployment.arms[side]
             cfg, version = articulation_config(arm, asset_root)
@@ -111,6 +131,28 @@ class DualArmArticulation:
                     sim_utils.modify_rigid_body_properties(
                         str(body.GetPath()), cfg.spawn.rigid_props
                     )
+            groups = (
+                ()
+                if arm.asset == PANDA_ASSET
+                else MODELS[model_name(arm.asset)].get("collision_groups", ())
+            )
+            for group in groups:
+                bodies = {
+                    body.GetName(): body
+                    for body in Usd.PrimRange(prim)
+                    if body.HasAPI(UsdPhysics.RigidBodyAPI) and body.GetName() in group
+                }
+                if set(bodies) != set(group):
+                    raise ValueError(
+                        f"Missing collision-filter bodies: {set(group) - set(bodies)}"
+                    )
+                for body in bodies.values():
+                    relation = UsdPhysics.FilteredPairsAPI.Apply(
+                        body
+                    ).CreateFilteredPairsRel()
+                    for other in bodies.values():
+                        if other != body:
+                            relation.AddTarget(other.GetPath())
             self.asset_versions[arm.asset] = version
             self.usd_paths[side] = cfg.spawn.usd_path
             self.controller_parameters[side] = {
@@ -118,6 +160,7 @@ class DualArmArticulation:
                     "joint_names": actuator.joint_names_expr,
                     "stiffness": actuator.stiffness,
                     "damping": actuator.damping,
+                    "armature": actuator.armature,
                     "effort_limit": actuator.effort_limit_sim,
                     "velocity_limit": actuator.velocity_limit_sim,
                 }
@@ -139,7 +182,11 @@ class DualArmArticulation:
                 "fixed_base": robot.is_fixed_base,
                 "collision_shapes": colliders,
                 "body_count": robot.num_bodies,
+                "visual_meshes_per_body": validate_visuals(root),
                 "joint_count": robot.num_joints,
+                "collision_exclusion_groups": []
+                if arm.asset == PANDA_ASSET
+                else MODELS[model_name(arm.asset)].get("collision_groups", ()),
             }
             arm_ids, arm_names = robot.find_joints(arm.joint_names, preserve_order=True)
             finger_ids, finger_names = robot.find_joints(
