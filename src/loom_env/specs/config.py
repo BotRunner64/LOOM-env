@@ -167,6 +167,8 @@ class ArmSpec:
 
 @dataclass(frozen=True)
 class CameraSpec:
+    """Pose of an OpenGL optical frame (-Z forward, +Y up) in parent_frame."""
+
     name: str
     width: int
     height: int

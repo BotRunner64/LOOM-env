@@ -316,7 +316,7 @@ def main():
 
         camera_pose = np.r_[
             camera.data.pos_w.torch[0].cpu().numpy(),
-            camera.data.quat_w_world.torch[0].cpu().numpy(),
+            camera.data.quat_w_opengl.torch[0].cpu().numpy(),
         ]
         deployment = replace(
             deployment,
@@ -348,7 +348,7 @@ def main():
                 },
                 "cube_pose_world": initial.world_state["cube/pose_world"].tolist(),
                 "camera_pose_world": camera_pose.tolist(),
-                "camera_convention": "world(+X forward,+Z up)",
+                "camera_convention": "opengl(-Z forward,+Y up)",
                 "camera_intrinsics": camera.data.intrinsic_matrices.torch[0]
                 .cpu()
                 .tolist(),

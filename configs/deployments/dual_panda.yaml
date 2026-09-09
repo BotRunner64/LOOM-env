@@ -36,4 +36,10 @@ arms:
     tcp_frame: panda_hand
     gripper: *gripper
 # Camera installation is added after the physical prototype is assembled.
-cameras: []
+cameras:
+  - name: front
+    width: 640
+    height: 480
+    period_steps: 1
+    parent_frame: world
+    pose: [2.0, 0.0, 1.9, 0.3681179873103491, 0.3681179873103491, 0.6037293660396003, 0.6037293660396003]

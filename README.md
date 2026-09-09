@@ -6,10 +6,10 @@
 
 技术路线：**Isaac Lab → Isaac Sim → PhysX**。专家轨迹采用 **任务状态机 + cuRobo 运动规划 + 仿真执行验证**。
 
-已实现阶段 A 的基础链路：配置与双臂动作协议、统一 Runner、放置任务检查器、HDF5 轨迹记录与离线读取。基础模块已通过自动化测试；Isaac Sim 6.0.1 的 GPU PhysX、RGB 渲染及 cuRobo 基础环境检查也已通过。另已提供共用的 Panda、Piper、X5、UR5＋WSG、xArm6＋Robotiq、OpenArm 和 YAM 的双臂关节运动录制、末端运动学检查和视频导出入口；正式的 ManagerBasedEnv 抓取场景、cuRobo 专家和物理重放仍待接入，尚未完成抓取放置仿真闭环。
+已实现双 Panda 的抓取放置闭环：`ManagerBasedEnv` 桌面场景、cuRobo 专家、真实接触反馈、统一 Runner、Episode 记录与物理动作重放。默认用一臂操作、另一臂保持，支持交换操作角色。Piper、X5、UR5＋WSG、xArm6＋Robotiq、OpenArm 和 YAM 目前支持双臂运动、FK 与夹爪诊断；抓取专家尚未扩展到这些本体。
 
 - [本体支持与资产准备](docs/embodiments.md)：七类本体的资产来源、准备命令、统一接口和验证范围。
-- [当前实现与运行方式](docs/implementation.md)：基础接口、数据格式、检查命令及后续阶段 A 工作。
+- [当前实现与运行方式](docs/implementation.md)：采集与重放命令、数据格式和验证范围。
 - [架构设计与实现计划](docs/architecture.md)：模块边界、核心数据协议、cuRobo 专家生成、状态恢复、Context 实验和分阶段验收。
 - [环境安装与验证](docs/environment.md)：Conda 环境、pip 安装步骤和 GPU／仿真检查。
 

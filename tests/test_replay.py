@@ -1,0 +1,61 @@
+from dataclasses import replace
+
+import pytest
+
+from loom_env.data.episodes import EpisodeReader, EpisodeWriter
+from loom_env.runtime.replay import ReplayComparison, ReplayTask
+from loom_env.specs.episode import Outcome, TaskStatus
+
+
+@pytest.mark.parametrize(
+    "change, passed",
+    [
+        ("none", True),
+        ("small_drift", True),
+        ("large_drift", False),
+        ("initial_drift", False),
+        ("missing_terminal", False),
+    ],
+)
+def test_physical_replay_comparison(
+    tmp_path, spec, frame_factory, action, change, passed
+):
+    spec = replace(
+        spec,
+        collection=replace(
+            spec.collection, deployment=replace(spec.collection.deployment, cameras=())
+        ),
+    )
+    with EpisodeWriter(tmp_path, spec) as writer:
+        writer.begin(frame_factory(spec))
+        for step in range(1, 4):
+            writer.append(action, action, frame_factory(spec, step))
+        path = writer.finish(Outcome("timeout", "test"))
+    with EpisodeReader(path) as original:
+        comparison = ReplayComparison(original)
+        for step in range(3 if change == "missing_terminal" else 4):
+            x = 0.5
+            if change == "initial_drift" and step == 0:
+                x += 0.001
+            elif step == 2:
+                x += {"small_drift": 0.001, "large_drift": 0.01}.get(change, 0)
+            comparison.add(frame_factory(spec, step, position=(x, 0.0, 0.8)), step)
+        assert comparison.report()["passed"] is passed
+
+
+def test_replay_evaluates_predicate_but_executes_terminal_action():
+    class AlreadySuccessful:
+        def reset(self, world):
+            self.calls = 0
+
+        def update(self, world, dt):
+            self.calls += 1
+            return TaskStatus(Outcome("success", "physical_predicate"))
+
+    physical = AlreadySuccessful()
+    replay = ReplayTask(physical, 3)
+    replay.reset({})
+    assert replay.update({}, 0.05).outcome is None
+    assert replay.update({}, 0.05).outcome is None
+    assert replay.update({}, 0.05).outcome.code == "success"
+    assert physical.calls == 3

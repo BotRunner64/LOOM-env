@@ -76,7 +76,9 @@ class PlaceTask:
         local_corners = (
             Rotation.from_quat(region[3:]).inv().apply(world_corners - region[:3])
         )
-        inside = np.all(np.abs(local_corners) <= self.region_size / 2 + 1e-9)
+        # Float32 poses and resting contacts need a small geometric tolerance.
+        # Ten micrometres accommodates numerical penetration at the box floor.
+        inside = np.all(np.abs(local_corners) <= self.region_size / 2 + 1e-5)
         settled = (
             inside
             and not grasped.any()

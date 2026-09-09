@@ -1,6 +1,6 @@
 # LOOM-env 架构设计
 
-状态：架构设计与分阶段计划。阶段 A 的配置、Runner、任务检查与离线数据基础已实现并通过自动化测试；已增加七类双臂本体共用接口、真实物理运动诊断、逐帧 FK 检查和视频导出，抓取放置仿真闭环尚未验证。详见 [当前实现](implementation.md)。
+状态：架构设计与分阶段计划。阶段 A 的配置、Runner、任务检查与离线数据基础已实现并通过自动化测试；已增加七类双臂本体共用接口、真实物理运动诊断、逐帧 FK 检查和视频导出，双 Panda 已接入 ManagerBasedEnv、抓取放置专家和物理重放。详见 [当前实现](implementation.md)。
 
 更新日期：2026-09-09。实际安装版本与验证结果见 [环境文档](environment.md)。
 
@@ -316,7 +316,7 @@ Episode
 - 区分 `success`、`task_failure`、`timeout`、`invalid_setup`、`runtime_error`。
 - 元数据、仿真真值和模型可见字段分开管理。
 
-基础实现采用 `h5py` 维护一套 LOOM Episode 格式，每个 episode 独立写入 HDF5 和 JSON manifest，校验后通过目录重命名发布，索引从已提交 manifest 重建。这满足离线读取与中断隔离要求，无需导入 Isaac Lab，也不再并行维护原生 HDF5 导出文件。原生 Recorder 的采集钩子在仿真接入阶段验证。当前 RGB 可内嵌 HDF5；图像／视频存储优化在原型吞吐量测量后确定，模型格式导出由独立适配器完成。
+基础实现采用 `h5py` 维护一套 LOOM Episode 格式，每个 episode 独立写入 HDF5 和 JSON manifest，校验后通过目录重命名发布，索引从已提交 manifest 重建。这满足离线读取与中断隔离要求，无需导入 Isaac Lab，也不再并行维护原生 HDF5 导出文件。原生 Recorder 的 pre/post-step 钩子已接入 ManagerBasedEnv，磁盘导出关闭，仅桥接到 LOOM Writer。当前 RGB 可内嵌 HDF5；图像／视频存储优化在原型吞吐量测量后确定，模型格式导出由独立适配器完成。
 
 原始轨迹提交后保持不可变，派生的模态转换、摘要、Context 配对和数据集版本保留来源引用。数据写入完成并通过完整性检查后再发布到索引，避免中断文件被当作有效 episode。
 
@@ -386,7 +386,7 @@ loom-env/
 └── tests/
 ```
 
-以上目录是目标结构。已实现 `specs`、`data`、`runtime` 的基础接口与 Runner、`tasks/place.py`，以及配置预设、离线检查入口和自动化测试；已实现 `embodiments` 共用本体接口，并提供已支持本体的双臂真实物理运动诊断与 FK 检查入口；正式任务环境组装、场景采样、专家、Context 和评测模块尚未实现。当前可运行命令及实现边界见 [实现说明](implementation.md)。大型资产使用已忽略的 `.cache/assets/` 或仓库外的共享目录，数据写入已忽略的 `outputs/` 或外部目录。
+以上目录是目标结构。已实现 `specs`、`data`、`runtime` 的基础接口与 Runner、`tasks/place.py`，以及配置预设、离线检查入口和自动化测试；已实现 `embodiments` 共用本体接口，并提供已支持本体的双臂真实物理运动诊断与 FK 检查入口；双 Panda 的任务环境、方块采样、专家和初态物理重放已实现；Context 和评测模块尚未实现。当前可运行命令及实现边界见 [实现说明](implementation.md)。大型资产使用已忽略的 `.cache/assets/` 或仓库外的共享目录，数据写入已忽略的 `outputs/` 或外部目录。
 
 首版每个模块从少量文件开始：`runtime/protocols.py` 定义接口，`runtime/build.py` 转换配置并创建环境，`runtime/runner.py` 调度回合，`runtime/recording.py` 对接原生钩子，`experts/curobo.py` 封装规划库。机器人 USD、关节／末端映射、控制与传感器预设属于 `embodiments`；场景对象实例的创建统一由运行时根据配置完成。
 

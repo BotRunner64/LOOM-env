@@ -72,3 +72,15 @@ def test_dropped_object_and_bad_truth(spec, frame_factory):
     bad["cube/grasped_by"] = np.zeros(2)
     with pytest.raises(ValueError, match="boolean"):
         task.reset(bad)
+
+
+def test_contact_roundoff_tolerance_does_not_accept_protrusion(spec, frame_factory):
+    task = PlaceTask(spec.collection)
+    # Float32 physics can place a resting corner a fraction of a micrometre
+    # past the ideal boundary. Larger geometric violations remain failures.
+    numerical = frame_factory(spec, position=(0.550001, 0.0, 0.8)).world_state
+    task.reset(numerical)
+    assert task.update(numerical, 0.25).outcome.code == "success"
+    protruding = frame_factory(spec, position=(0.55002, 0.0, 0.8)).world_state
+    task.reset(protruding)
+    assert task.update(protruding, 0.25).outcome is None

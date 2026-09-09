@@ -104,7 +104,9 @@ def articulation_config(arm, asset_root):
 class DualArmArticulation:
     """Map native joints to the deployment protocol without padding or clipping."""
 
-    def __init__(self, deployment: DeploymentSpec, asset_root: str | Path):
+    def __init__(
+        self, deployment: DeploymentSpec, asset_root: str | Path, *, robots=None
+    ):
         self.deployment = deployment
         self.robots = {}
         self.joint_ids, self.gripper_ids, self.tcp_ids = {}, {}, {}
@@ -122,10 +124,13 @@ class DualArmArticulation:
             arm = deployment.arms[side]
             cfg, version = articulation_config(arm, asset_root)
             cfg.prim_path = f"/World/{side}_robot"
-            self.robots[side] = Articulation(cfg)
+            self.robots[side] = Articulation(cfg) if robots is None else robots[side]
+            cfg = self.robots[side].cfg
             # URDF importer 3.0 nests rigid links. Lab's spawn helper stops at
             # the first rigid body, so apply the same properties to every link.
-            prim = get_current_stage().GetPrimAtPath(cfg.prim_path)
+            prim = get_current_stage().GetPrimAtPath(
+                sim_utils.find_matching_prim_paths(cfg.prim_path)[0]
+            )
             for body in Usd.PrimRange(prim):
                 if body.HasAPI(UsdPhysics.RigidBodyAPI):
                     sim_utils.modify_rigid_body_properties(
@@ -171,7 +176,9 @@ class DualArmArticulation:
         """Validate the actual imported model after the simulator's first reset."""
         for side, robot in self.robots.items():
             arm = self.deployment.arms[side]
-            root = get_current_stage().GetPrimAtPath(robot.cfg.prim_path)
+            root = get_current_stage().GetPrimAtPath(
+                sim_utils.find_matching_prim_paths(robot.cfg.prim_path)[0]
+            )
             colliders = sum(
                 prim.HasAPI(UsdPhysics.CollisionAPI)
                 for prim in Usd.PrimRange(root, Usd.TraverseInstanceProxies())
