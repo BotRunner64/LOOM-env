@@ -41,4 +41,25 @@ arms:
     base_pose: [0, -0.45, 0.75, 0, 0, 0, 1]
     tcp_frame: link6
     gripper: *id004
-cameras: []
+# Optical poses: xyz metres + quaternion xyzw, OpenGL (-Z forward, +Y up).
+cameras:
+  - name: front
+    width: 640
+    height: 480
+    period_steps: 1
+    parent_frame: world
+    pose: [2.0, 0.0, 1.9, 0.3681179873103491, 0.3681179873103491, 0.6037293660396003, 0.6037293660396003]
+  - name: left_wrist
+    width: 640
+    height: 480
+    period_steps: 1
+    parent_frame: left/link6
+    pose: [0.07, 0, 0.04, 0.690322957027, 0.690322957027, 0.153147690159, 0.153147690159]
+    focal_length: 16.0
+  - name: right_wrist
+    width: 640
+    height: 480
+    period_steps: 1
+    parent_frame: right/link6
+    pose: [0.07, 0, 0.04, 0.690322957027, 0.690322957027, 0.153147690159, 0.153147690159]
+    focal_length: 16.0

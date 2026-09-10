@@ -175,6 +175,9 @@ class CameraSpec:
     period_steps: int
     parent_frame: str
     pose: tuple[float, ...]
+    focal_length: float = 22.0
+    horizontal_aperture: float = 24.0
+    clipping_range: tuple[float, float] = (0.01, 20.0)
 
     def __post_init__(self):
         identifier(self.name)
@@ -183,9 +186,27 @@ class CameraSpec:
                 raise ValueError(
                     "Camera dimensions and period_steps must be positive ints"
                 )
-        if not self.parent_frame:
-            raise ValueError("Camera parent_frame is required")
+        if not isinstance(self.parent_frame, str):
+            raise ValueError("Camera parent_frame must be a string")
+        if self.parent_frame != "world":
+            parts = self.parent_frame.split("/")
+            if len(parts) != 2 or parts[0] not in ARMS:
+                raise ValueError(
+                    "Camera parent_frame must be world or left/right/<body>"
+                )
+            identifier(parts[1])
         object.__setattr__(self, "pose", pose(self.pose))
+        for value in (self.focal_length, self.horizontal_aperture):
+            if not math.isfinite(value) or value <= 0:
+                raise ValueError("Camera focal length and aperture must be positive")
+        clip = tuple(self.clipping_range)
+        if (
+            len(clip) != 2
+            or not all(math.isfinite(v) for v in clip)
+            or not 0 < clip[0] < clip[1]
+        ):
+            raise ValueError("Camera clipping range must satisfy 0 < near < far")
+        object.__setattr__(self, "clipping_range", clip)
 
 
 @dataclass(frozen=True)

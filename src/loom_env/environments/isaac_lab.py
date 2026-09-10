@@ -25,11 +25,10 @@ from isaaclab.managers import (
 from isaaclab.managers.recorder_manager import RecorderManagerBaseCfg, DatasetExportMode
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.utils import configclass
-from isaaclab.sensors import CameraCfg
 from isaaclab_physx.physics import PhysxCfg
-from isaaclab_physx.renderers import IsaacRtxRendererCfg
 from isaaclab_physx.sensors import ContactSensorCfg
 
+from loom_env.embodiments.cameras import CameraMounts, camera_config
 from loom_env.embodiments.assets import PANDA_ASSET
 from loom_env.embodiments.isaac_lab import DualArmArticulation, articulation_config
 from loom_env.environments.tabletop import (
@@ -124,10 +123,17 @@ def policy_signal(env, key):
         env.control_step // camera_spec.period_steps * camera_spec.period_steps
     )
     if field == "rgb":
+        if env.camera_sync_step != env.control_step:
+            env.camera_mounts.update(env.sim, warmup=env.control_step == 0)
+            env.camera_sync_step = env.control_step
         camera = env.scene[f"camera_{name}"]
         if env.camera_steps.get(name) != capture_step:
             camera.update(env.step_dt, force_recompute=True)
             env.camera_images[name] = camera.data.output["rgb"].torch[..., :3].clone()
+            env.camera_poses[name] = np.r_[
+                camera.data.pos_w.torch[0].cpu().numpy(),
+                camera.data.quat_w_opengl.torch[0].cpu().numpy(),
+            ]
             env.camera_steps[name] = capture_step
         return env.camera_images[name]
     if field == "valid":
@@ -213,24 +219,10 @@ def environment_config(collection, asset_root):
         prim_path="/World/Ground", spawn=sim_utils.GroundPlaneCfg()
     )
     for camera in collection.deployment.cameras:
-        if camera.parent_frame != "world":
-            raise ValueError("Tabletop cameras currently require parent_frame: world")
         setattr(
             scene,
             f"camera_{camera.name}",
-            CameraCfg(
-                prim_path=f"/World/Camera_{camera.name}",
-                width=camera.width,
-                height=camera.height,
-                offset=CameraCfg.OffsetCfg(
-                    pos=camera.pose[:3], rot=camera.pose[3:], convention="opengl"
-                ),
-                spawn=sim_utils.PinholeCameraCfg(
-                    focal_length=22, horizontal_aperture=24, clipping_range=(0.05, 20)
-                ),
-                data_types=["rgb"],
-                renderer_cfg=IsaacRtxRendererCfg(),
-            ),
+            camera_config(camera),
         )
     observations = ObservationGroupCfg(concatenate_terms=False, enable_corruption=False)
     for key in observation_shapes(collection.deployment):
@@ -270,9 +262,17 @@ class TabletopEnvironment(ManagerBasedEnv):
         self.collection = collection
         self.asset_root = asset_root
         self.control_step = 0
-        self.camera_steps, self.camera_images = {}, {}
+        self.camera_steps, self.camera_images, self.camera_poses = {}, {}, {}
+        self.camera_sync_step = None
         self.recorded_frame = None
         super().__init__(environment_config(collection, asset_root))
+        # Cold PhysX/Fabric initialization needs one actual step before reset_to
+        # can refresh articulation visuals. This is outside every Episode;
+        # reset_episode restores the complete recorded state afterwards.
+        self.robot.reset(initial_command(collection.deployment))
+        self.scene.write_data_to_sim()
+        self.sim.step(render=False)
+        self.scene.update(self.physics_dt)
 
     def load_managers(self):
         self.robot = DualArmArticulation(
@@ -281,6 +281,14 @@ class TabletopEnvironment(ManagerBasedEnv):
             robots={side: self.scene[side] for side in ARMS},
         )
         self.robot.initialize()
+        self.camera_mounts = CameraMounts(
+            self.collection.deployment.cameras,
+            {
+                c.name: self.scene[f"camera_{c.name}"]
+                for c in self.collection.deployment.cameras
+            },
+            self.robot.robots,
+        )
         super().load_managers()
 
     def world_state(self):
@@ -321,6 +329,10 @@ class TabletopEnvironment(ManagerBasedEnv):
             f"{obj}/velocity_world": velocity,
             f"{obj}/grasped_by": np.asarray(grasped, dtype=bool),
             f"{obj}/finger_contact_forces_world": np.asarray(contacts),
+            **{
+                f"cameras/{camera.name}/pose_world": self.camera_poses[camera.name]
+                for camera in self.collection.deployment.cameras
+            },
             f"{receptacle}/region_pose_world": np.r_[
                 self.collection.scene.parameters["container_position"],
                 [0.0, 0.0, 0.0, 1.0],
@@ -360,6 +372,7 @@ class TabletopEnvironment(ManagerBasedEnv):
             )
         self.control_step = self._sim_step_counter = 0
         self.camera_steps.clear()
+        self.camera_sync_step = None
         state = _tree_map(
             plain(spec.initial_state["scene"]),
             lambda v: torch.tensor(v, device=self.device, dtype=torch.float32),
@@ -381,6 +394,7 @@ class TabletopEnvironment(ManagerBasedEnv):
         """Settle a candidate, validate it, then freeze measured simulator state."""
         self.control_step = self._sim_step_counter = 0
         self.camera_steps.clear()
+        self.camera_sync_step = None
         self.reset(seed=seed)
         command = initial_command(self.collection.deployment)
         self.robot.reset(command)

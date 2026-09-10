@@ -35,7 +35,7 @@ arms:
     base_pose: [0.0, -0.4, 0.75, 0.0, 0.0, 0.0, 1.0]
     tcp_frame: panda_hand
     gripper: *gripper
-# Camera installation is added after the physical prototype is assembled.
+# Optical poses: xyz metres + quaternion xyzw, OpenGL (-Z forward, +Y up).
 cameras:
   - name: front
     width: 640
@@ -43,3 +43,17 @@ cameras:
     period_steps: 1
     parent_frame: world
     pose: [2.0, 0.0, 1.9, 0.3681179873103491, 0.3681179873103491, 0.6037293660396003, 0.6037293660396003]
+  - name: left_wrist
+    width: 640
+    height: 480
+    period_steps: 1
+    parent_frame: left/panda_hand
+    pose: [0.07, 0, 0.025, 0.680844797956, 0.680844797956, 0.190919776598, 0.190919776598]
+    focal_length: 16.0
+  - name: right_wrist
+    width: 640
+    height: 480
+    period_steps: 1
+    parent_frame: right/panda_hand
+    pose: [0.07, 0, 0.025, 0.680844797956, 0.680844797956, 0.190919776598, 0.190919776598]
+    focal_length: 16.0

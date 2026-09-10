@@ -2,8 +2,8 @@
 """Record a real dual-arm joint-motion diagnostic with the LOOM Runner.
 
 This uses Isaac Lab's low-level SimulationContext, as in its articulation
-tutorial. It is a motion/rendering diagnostic, not the planned ManagerBasedEnv
-pick-and-place implementation. No cuRobo planner or grasp expert is used.
+tutorial. It is a motion/rendering diagnostic, separate from ManagerBasedEnv
+pick-and-place collection. No cuRobo planner or grasp expert is used.
 """
 
 from __future__ import annotations
@@ -24,7 +24,6 @@ from loom_env.runtime.runner import EpisodeRunner
 from loom_env.runtime.motion import DURATION, MotionCheck, MotionSource, gripper_command
 from loom_env.specs.config import (
     ARMS,
-    CameraSpec,
     EpisodeSpec,
     TaskSpec,
     load_collection,
@@ -66,13 +65,12 @@ def main():
     launcher = AppLauncher(headless=True, enable_cameras=True)
     app = launcher.app
     try:
-        import torch
         import isaaclab.sim as sim_utils
         from isaaclab.assets import RigidObject, RigidObjectCfg
-        from isaaclab.sensors import Camera, CameraCfg
+        from isaaclab.sensors import Camera
+        from loom_env.embodiments.cameras import CameraMounts, camera_config
         from loom_env.embodiments.isaac_lab import DualArmArticulation
         from isaaclab_physx.physics import PhysxCfg
-        from isaaclab_physx.renderers import IsaacRtxRendererCfg
 
         sim = sim_utils.SimulationContext(
             sim_utils.SimulationCfg(
@@ -147,28 +145,16 @@ def main():
                 (0.16, 0.40, 0.30),
             )
 
-        camera = Camera(
-            CameraCfg(
-                prim_path="/World/Camera",
-                height=640,
-                width=960,
-                data_types=["rgb"],
-                renderer_cfg=IsaacRtxRendererCfg(),
-                spawn=sim_utils.PinholeCameraCfg(
-                    focal_length=22.0,
-                    horizontal_aperture=24.0,
-                    clipping_range=(0.05, 20.0),
-                ),
-            )
-        )
+        cameras = {
+            spec.name: Camera(camera_config(spec)) for spec in deployment.cameras
+        }
+        camera_samples = {}
         sim.reset()
         robot.initialize()
+        camera_mounts = CameraMounts(deployment.cameras, cameras, robot.robots)
         cube.reset()
-        camera.reset()
-        camera.set_world_poses_from_view(
-            eyes=torch.tensor([[2.0, 2.0, 2.0]], device=sim.device),
-            targets=torch.tensor([[0.30, 0.0, 1.04]], device=sim.device),
-        )
+        for camera in cameras.values():
+            camera.reset()
 
         def advance():
             for substep in range(deployment.decimation):
@@ -176,7 +162,6 @@ def main():
                 sim.step(render=substep == deployment.decimation - 1)
                 robot.update(deployment.physics_dt)
                 cube.update(deployment.physics_dt)
-            camera.update(deployment.control_dt, force_recompute=True)
 
         def settle(command):
             robot.reset(command)
@@ -258,6 +243,7 @@ def main():
         print("ROBOT_RESET_CHECKS " + json.dumps(reset_checks), flush=True)
 
         def capture(step, command):
+            camera_mounts.update(sim, warmup=step == 0)
             values = robot.observe()
             errors, grippers = [], []
             diagnostics = {}
@@ -279,11 +265,29 @@ def main():
                         arm.gripper, values[f"robot/{side}/gripper_position"]
                     )
                 )
-            values["cameras/front/rgb"] = (
-                camera.data.output["rgb"].torch[0, ..., :3].cpu().numpy()
-            )
-            values["cameras/front/timestamp"] = np.array(step * deployment.control_dt)
-            values["cameras/front/valid"] = np.array(True)
+            camera_poses = {}
+            for camera_spec in deployment.cameras:
+                name = camera_spec.name
+                camera = cameras[name]
+                if name not in camera_samples or step % camera_spec.period_steps == 0:
+                    camera.update(deployment.control_dt, force_recompute=True)
+                    camera_samples[name] = (
+                        camera.data.output["rgb"]
+                        .torch[0, ..., :3]
+                        .cpu()
+                        .numpy()
+                        .copy(),
+                        step * deployment.control_dt,
+                        np.r_[
+                            camera.data.pos_w.torch[0].cpu().numpy(),
+                            camera.data.quat_w_opengl.torch[0].cpu().numpy(),
+                        ],
+                    )
+                rgb, timestamp, camera_pose = camera_samples[name]
+                values[f"cameras/{name}/rgb"] = rgb
+                values[f"cameras/{name}/timestamp"] = np.array(timestamp)
+                values[f"cameras/{name}/valid"] = np.array(True)
+                camera_poses[f"cameras/{name}/pose_world"] = camera_pose
             return Frame(
                 Observation(step * deployment.control_dt, values),
                 {
@@ -294,12 +298,14 @@ def main():
                     "diagnostic/tracking_error": np.asarray(errors),
                     "diagnostic/gripper_command": np.asarray(grippers),
                     **diagnostics,
+                    **camera_poses,
                 },
             )
 
         class PreviewEnvironment:
             def reset_episode(self, spec):
                 self.step_count = 0
+                camera_samples.clear()
                 # This one-shot diagnostic was initialized and settled above.
                 return capture(0, source.home)
 
@@ -314,15 +320,6 @@ def main():
                     )
                 return Transition(capture(self.step_count, action), action.copy())
 
-        camera_pose = np.r_[
-            camera.data.pos_w.torch[0].cpu().numpy(),
-            camera.data.quat_w_opengl.torch[0].cpu().numpy(),
-        ]
-        deployment = replace(
-            deployment,
-            id=deployment.id + "_motion_preview",
-            cameras=(CameraSpec("front", 960, 640, 1, "world", camera_pose),),
-        )
         initial = capture(0, source.home)
         collection = replace(
             collection,
@@ -347,11 +344,15 @@ def main():
                     if key.startswith("robot/")
                 },
                 "cube_pose_world": initial.world_state["cube/pose_world"].tolist(),
-                "camera_pose_world": camera_pose.tolist(),
+                "camera_pose_world": {
+                    name: initial.world_state[f"cameras/{name}/pose_world"].tolist()
+                    for name in cameras
+                },
                 "camera_convention": "opengl(-Z forward,+Y up)",
-                "camera_intrinsics": camera.data.intrinsic_matrices.torch[0]
-                .cpu()
-                .tolist(),
+                "camera_intrinsics": {
+                    name: camera.data.intrinsic_matrices.torch[0].cpu().tolist()
+                    for name, camera in cameras.items()
+                },
             },
             sampled_parameters={
                 "randomization": "none",

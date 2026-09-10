@@ -56,4 +56,25 @@ arms:
       - [0.5]
       - [0.5]
       joint_offset: [0, 0]
-cameras: []
+# Optical poses: xyz metres + quaternion xyzw, OpenGL (-Z forward, +Y up).
+cameras:
+  - name: front
+    width: 640
+    height: 480
+    period_steps: 1
+    parent_frame: world
+    pose: [2.0, 0.0, 1.9, 0.3681179873103491, 0.3681179873103491, 0.6037293660396003, 0.6037293660396003]
+  - name: left_wrist
+    width: 640
+    height: 480
+    period_steps: 1
+    parent_frame: left/openarm_left_link7
+    pose: [0.075, 0, 0.1, 0.6708203932499369, 0.6708203932499369, 0.22360679774997896, 0.22360679774997896]
+    focal_length: 16.0
+  - name: right_wrist
+    width: 640
+    height: 480
+    period_steps: 1
+    parent_frame: right/openarm_right_link7
+    pose: [0.075, 0, 0.1, 0.6708203932499369, 0.6708203932499369, 0.22360679774997896, 0.22360679774997896]
+    focal_length: 16.0

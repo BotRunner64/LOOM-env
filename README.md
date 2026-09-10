@@ -6,7 +6,7 @@
 
 技术路线：**Isaac Lab → Isaac Sim → PhysX**。专家轨迹采用 **任务状态机 + cuRobo 运动规划 + 仿真执行验证**。
 
-已实现双 Panda 的抓取放置闭环：`ManagerBasedEnv` 桌面场景、cuRobo 专家、真实接触反馈、统一 Runner、Episode 记录与物理动作重放。默认用一臂操作、另一臂保持，支持交换操作角色。Piper、X5、UR5＋WSG、xArm6＋Robotiq、OpenArm 和 YAM 目前支持双臂运动、FK 与夹爪诊断；抓取专家尚未扩展到这些本体。
+已实现双 Panda 的抓取放置闭环：`ManagerBasedEnv` 桌面场景、cuRobo 专家、真实接触反馈、统一 Runner、Episode 记录与物理动作重放。默认用一臂操作、另一臂保持，支持交换操作角色。部署统一配置前视、左腕、右腕三路 RGB，相机挂接与记录共用于采集和运动诊断。Piper、X5、UR5＋WSG、xArm6＋Robotiq、OpenArm 和 YAM 目前支持双臂运动、FK 与夹爪诊断；抓取专家尚未扩展到这些本体。
 
 - [本体支持与资产准备](docs/embodiments.md)：七类本体的资产来源、准备命令、统一接口和验证范围。
 - [当前实现与运行方式](docs/implementation.md)：采集与重放命令、数据格式和验证范围。

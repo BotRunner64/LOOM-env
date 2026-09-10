@@ -35,4 +35,25 @@ arms:
     base_pose: [0.0, -0.4, 0.75, 0.0, 0.0, 0.0, 1.0]
     tcp_frame: gripper
     gripper: *gripper
-cameras: []
+# Optical poses: xyz metres + quaternion xyzw, OpenGL (-Z forward, +Y up).
+cameras:
+  - name: front
+    width: 640
+    height: 480
+    period_steps: 1
+    parent_frame: world
+    pose: [2.0, 0.0, 1.9, 0.3681179873103491, 0.3681179873103491, 0.6037293660396003, 0.6037293660396003]
+  - name: left_wrist
+    width: 640
+    height: 480
+    period_steps: 1
+    parent_frame: left/gripper
+    pose: [0.11, 0.0, -0.045, 0.2254488462476597, -0.2254488462476597, 0.6702035643933858, -0.6702035643933858]
+    focal_length: 16.0
+  - name: right_wrist
+    width: 640
+    height: 480
+    period_steps: 1
+    parent_frame: right/gripper
+    pose: [0.11, 0.0, -0.045, 0.2254488462476597, -0.2254488462476597, 0.6702035643933858, -0.6702035643933858]
+    focal_length: 16.0

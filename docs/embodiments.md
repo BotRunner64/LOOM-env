@@ -88,6 +88,37 @@ python scripts/check_kinematics.py \
 
 机械臂及夹爪的力／力矩上限默认取自 URDF，Robotiq 采用上文说明的保守夹爪上限。诊断把机械臂速度上限限制为源限值与 3 rad/s 的较小值，夹爪限制为源限值与 1 m/s 或 rad/s 的较小值。PD 增益按模型配置；机器人全部连杆禁用重力，自碰撞启用。导入器可能嵌套刚体，因此共用适配器明确将刚体配置应用到每根连杆。
 
+## 三路相机
+
+七类部署统一配置 `front`、`left_wrist`、`right_wrist`，均为 640×480 RGB、每个控制步采样一次（默认 20 Hz）。抓取采集与运动预览读取同一部署配置，不再由预览脚本单独覆盖相机。
+
+- `front` 固定在世界坐标 `(2.0, 0.0, 1.9)` m，朝向桌面操作区。
+- 腕相机相对各臂末端刚性连杆固定，随连杆移动；不跟随活动夹指开合。Panda 使用 `panda_hand`，Piper／X5／xArm6 使用 `link6`，UR5 使用 `wrist_3_link`，OpenArm 使用各侧 `link7`，YAM 使用 `gripper`。
+- 各本体的安装位姿分别维护在对应 deployment 中。X5 夹爪沿局部 +X、YAM 沿 -Z，其余也按各自夹爪几何设置，不能直接复制同一偏移。
+
+`parent_frame` 取 `world` 或 `left/<刚体名称>`／`right/<刚体名称>`；`pose` 是相对该坐标系的 xyz（m）加 xyzw 四元数，光学约定为 OpenGL（-Z 朝前、+Y 朝上）。初始化时按刚体名称绑定原生 articulation 中的实际连杆，缺失时报错。渲染前用实测连杆世界位姿与固定安装位姿合成相机位姿，并同步全部腕相机；USD 光学 prim 放在世界系，避免当前 Fabric 对嵌套子相机的陈旧变换。图像及位姿在同一采样时刻缓存。每次初帧取图前预热渲染，不推进物理或控制时间。任务环境在创建时先完成一次 GPU articulation 步进初始化，之后再完整恢复 Episode 初态，避免冷启动重放的机器人外观仍停留在加载姿态。当前采集与诊断均为单环境。
+
+`focal_length` 与 `horizontal_aperture` 使用 mm，`clipping_range` 使用 m。全局相机焦距 22 mm、水平孔径 24 mm（水平视场约 57°），腕相机焦距 16 mm（约 74°），近裁剪距离 1 cm。实际内参写入 Episode 元数据；采样时相机世界位姿保存在真值 `cameras/<name>/pose_world`，与该相机 RGB 时间戳对应，不作为模型观测。
+
+目前模拟光学传感器，不增加相机外壳、支架质量或碰撞体。安装位姿用于仿真视角，不表示已经完成实机安装标定。导出指定视角：
+
+```bash
+python scripts/export_video.py outputs/pick_place/episodes/panda-place \
+  outputs/pick_place/panda-left-wrist.mp4 --camera left_wrist
+```
+
+### 相机验证（2026-09-10）
+
+七类本体已完成三路 RGB 录制与视角检查。Panda 抓取成功（208 个动作、209 帧），其他六类本体分别完成 12 秒运动与夹爪开合诊断（240 个动作、241 帧）。逐帧以相机采样时间对应的实测 TCP 位姿合成安装变换，与独立读取的相机世界位姿比较，位置阈值 0.1 mm、姿态阈值 0.001 rad；均通过。该误差检查验证仿真中的坐标一致性，不表示实机标定精度。
+
+另用 Panda 的三路相机分别每 1／2／3 个控制步采样，验证缓存图像、时间戳及位姿对齐，并在两臂运动后恢复初态；相机位姿恢复最大分量误差为 1.2e-7。预热后的 RGB 允许渲染噪声，不要求逐像素相等。Panda 完整动作重放再次通过物理任务与逐帧状态比较。
+
+验证产物保存在 Git 忽略的 `outputs/cameras/`：各本体的 `*-cameras.json` 为安装变换检查，`*-views.jpg` 为分阶段视角；最终本体预设对应 Panda／Piper／X5／xArm6 的 `004`、OpenArm／UR5 的 `005`、YAM 的 `006`。`reset/reset-report.json` 保存多频率与重置结果。早期诊断产物保留，不作为最终相机验收结果。汇总报告为 `outputs/cameras/validation.json`，同时校验所选轨迹的部署与当前 YAML 一致。
+
+- [七类本体三视角总览](../outputs/cameras/embodiment-camera-views.jpg)
+- [Panda 三视角抓取视频](../outputs/cameras/panda-three-view-pick-place-final.mp4)
+- 最终冷启动重放：`outputs/cameras/panda-replay-final/`，209 帧物理状态与原轨迹完全一致。
+
 ## 验收范围
 
 重置明确写入关节位置、零速度和控制目标。预览要求机械臂误差低于 0.003 rad、速度低于 0.01 rad/s；移动夹爪误差低于 0.0005 m，旋转夹爪低于 0.003 rad，速度低于各自单位下的 0.01/s，连续稳定 0.25 秒，最长等待 5 秒。还会先运动再重置复验，稳定化过程不进入 episode 时间。

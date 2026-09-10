@@ -132,3 +132,25 @@ import loom_env.embodiments.assets
 import loom_env.runtime.motion
 """
     subprocess.run([sys.executable, "-c", script], check=True)
+
+
+@pytest.mark.parametrize(
+    "parent", [None, 0, "", "left", "wrist/link6", "left/../link6", "right/a/b"]
+)
+def test_camera_rejects_ambiguous_mount_frames(collection, parent):
+    with pytest.raises(ValueError, match="parent_frame|identifier"):
+        replace(collection.deployment.cameras[0], parent_frame=parent)
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"focal_length": 0},
+        {"horizontal_aperture": float("nan")},
+        {"clipping_range": [0.1, 0.01]},
+        {"clipping_range": [0, 20]},
+    ],
+)
+def test_camera_rejects_invalid_optics(collection, change):
+    with pytest.raises(ValueError, match="Camera"):
+        replace(collection.deployment.cameras[0], **change)
