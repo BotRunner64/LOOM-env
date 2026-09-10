@@ -1,77 +1,136 @@
-"""Shared primitive geometry and candidate sampling for the first place task."""
+"""Shared tabletop geometry, object sampling and physical grasp evidence."""
 
 import numpy as np
 
+from loom_env.specs.config import vector
+
+
+TABLE_SIZE = (1.6, 1.8, 0.08)
+TABLE_CENTER_XY = (0.45, 0.0)
+WALL = 0.01
+
 
 def tabletop_geometry(collection):
-    """Return the exact boxes used both by PhysX and the motion planner."""
-    p = collection.scene.parameters
-    expected = {
-        "table_height",
-        "cube_position_min",
-        "cube_position_max",
-        "container_position",
-    }
-    if set(p) != expected:
-        raise ValueError(
-            "Tabletop scene parameters must specify exactly "
-            + ", ".join(sorted(expected))
-        )
-    assets = {"target_object": "primitive:cube", "container": "primitive:open_box"}
-    if set(collection.role_bindings) != set(assets) or set(
-        collection.scene.objects
-    ) != set(collection.role_bindings.values()):
-        raise ValueError(
-            "Tabletop scene requires exactly a target object and a container"
-        )
-    for role, asset in assets.items():
-        obj = collection.scene.objects[collection.role_bindings[role]]
-        if set(obj) != {"asset", "category"} or obj["asset"] != asset:
-            raise ValueError(f"Unsupported tabletop object for {role}: {obj}")
-    height = float(p["table_height"])
-    sx, sy, sz = collection.task.parameters["region_size"]
-    cx, cy, cz = p["container_position"]  # center of the internal target region
-    wall = 0.01
-    floor = cz - sz / 2
-    if not np.isclose(floor - wall, height):
-        raise ValueError("Container floor must rest on the table")
+    """Static boxes shared by PhysX, previews and the collision planner.
+
+    Object dimensions, colors and sampling bounds belong to the scene. Role
+    bindings only select the object and receptacle used by a particular task.
+    """
+    if set(collection.scene.parameters) != {"table_height"}:
+        raise ValueError("Tabletop scene parameters must specify exactly table_height")
+    height = float(collection.scene.parameters["table_height"])
+    if not np.isfinite(height) or height <= 0:
+        raise ValueError("Table height must be finite and positive")
+    if set(collection.role_bindings) != {"target_object", "container"}:
+        raise ValueError("Tabletop requires target_object and container roles")
     boxes = {
-        "table": {"size": [1.6, 1.8, 0.08], "position": [0.45, 0, height - 0.04]},
-        "container_base": {
-            "size": [sx + 2 * wall, sy + 2 * wall, wall],
-            "position": [cx, cy, floor - wall / 2],
-        },
-    }
-    for name, size, offset in (
-        ("xm", [wall, sy + 2 * wall, sz], [-(sx + wall) / 2, 0, 0]),
-        ("xp", [wall, sy + 2 * wall, sz], [(sx + wall) / 2, 0, 0]),
-        ("ym", [sx, wall, sz], [0, -(sy + wall) / 2, 0]),
-        ("yp", [sx, wall, sz], [0, (sy + wall) / 2, 0]),
-    ):
-        boxes[f"container_{name}"] = {
-            "size": size,
-            "position": (np.array([cx, cy, cz]) + offset).tolist(),
+        "table": {
+            "size": TABLE_SIZE,
+            "position": [*TABLE_CENTER_XY, height - TABLE_SIZE[2] / 2],
+            "color": [0.43, 0.47, 0.51],
         }
+    }
+    footprints = []
+    common = {"asset", "category", "description", "size", "color"}
+    for name, obj in collection.scene.objects.items():
+        is_cube = obj["asset"] == "primitive:cube"
+        is_container = obj["asset"] == "primitive:open_box"
+        expected = common | (
+            {"position_min", "position_max"} if is_cube else {"position"}
+        )
+        if not (is_cube or is_container) or set(obj) != expected:
+            raise ValueError(f"Unsupported tabletop object fields: {name}")
+        if obj["category"] != ("graspable_object" if is_cube else "receptacle"):
+            raise ValueError(f"Incorrect tabletop object category: {name}")
+        if not isinstance(obj["description"], str) or not obj["description"].strip():
+            raise ValueError(f"Object description is required: {name}")
+        size = np.asarray(vector(obj["size"], 3, f"{name} size"))
+        color = np.asarray(vector(obj["color"], 3, f"{name} color"))
+        if np.any(size <= 0) or np.any((color < 0) | (color > 1)):
+            raise ValueError(f"Invalid size or color: {name}")
+        if is_cube:
+            low = np.asarray(vector(obj["position_min"], 3, f"{name} position_min"))
+            high = np.asarray(vector(obj["position_max"], 3, f"{name} position_max"))
+            if np.any(high < low) or low[2] - size[2] / 2 < height - 1e-8:
+                raise ValueError(f"Invalid or unsupported sampling bounds: {name}")
+            for bound in (low, high):
+                _on_table(name, bound, size)
+            continue
+        center = np.asarray(vector(obj["position"], 3, f"{name} position"))
+        sx, sy, sz = size
+        floor = center[2] - sz / 2
+        if not np.isclose(floor - WALL, height):
+            raise ValueError(f"Container floor must rest on the table: {name}")
+        outer = size + [2 * WALL, 2 * WALL, 0]
+        _on_table(name, center, outer)
+        if any(
+            np.all(np.abs(center[:2] - c[:2]) < (outer[:2] + s[:2]) / 2)
+            for c, s in footprints
+        ):
+            raise ValueError("Containers must not overlap")
+        footprints.append((center, outer))
+        for part, dims, position in (
+            (
+                "base",
+                [sx + 2 * WALL, sy + 2 * WALL, WALL],
+                [center[0], center[1], floor - WALL / 2],
+            ),
+            ("xm", [WALL, sy + 2 * WALL, sz], center + [-(sx + WALL) / 2, 0, 0]),
+            ("xp", [WALL, sy + 2 * WALL, sz], center + [(sx + WALL) / 2, 0, 0]),
+            ("ym", [sx, WALL, sz], center + [0, -(sy + WALL) / 2, 0]),
+            ("yp", [sx, WALL, sz], center + [0, (sy + WALL) / 2, 0]),
+        ):
+            key = f"{name}_{part}"
+            if key in boxes:
+                raise ValueError(f"Duplicate geometry name: {key}")
+            boxes[key] = {
+                "size": list(dims),
+                "position": list(position),
+                "color": list(color),
+            }
+    for name, obj in collection.scene.objects.items():
+        if obj["asset"] == "primitive:cube" and name in boxes:
+            raise ValueError(f"Object name conflicts with static geometry: {name}")
     return boxes
 
 
-def sample_cube(collection, seed):
-    """Sample reproducibly; reject overlaps before entering the simulator."""
-    p = collection.scene.parameters
-    low, high = np.asarray(p["cube_position_min"]), np.asarray(p["cube_position_max"])
-    if low.shape != (3,) or high.shape != (3,) or np.any(high < low):
-        raise ValueError("Invalid cube sampling bounds")
-    half = np.asarray(collection.task.parameters["object_size"]) / 2
-    center = np.asarray(p["container_position"])
-    outer = np.asarray(collection.task.parameters["region_size"]) / 2 + 0.01
+def _on_table(name, position, size):
+    if np.any(
+        np.abs(np.asarray(position)[:2] - TABLE_CENTER_XY) + np.asarray(size)[:2] / 2
+        > np.asarray(TABLE_SIZE)[:2] / 2 + 1e-8
+    ):
+        raise ValueError(f"Object extends outside the tabletop: {name}")
+
+
+def sample_objects(collection, seed):
+    """Sample every free object deterministically, independently of task bindings."""
+    tabletop_geometry(collection)
     rng = np.random.default_rng(seed)
-    for _ in range(100):
-        position = rng.uniform(low, high)
-        if position[2] - half[2] < p["table_height"] - 1e-8:
-            raise ValueError("Cube sampling bounds penetrate the table")
-        if np.any(np.abs(position[:2] - center[:2]) > outer[:2] + half[:2] + 0.02):
-            return position
-    raise ValueError("Could not sample a cube separated from the container")
+    occupied = [
+        (np.asarray(obj["position"]), np.asarray(obj["size"]) + [2 * WALL, 2 * WALL, 0])
+        for obj in collection.scene.objects.values()
+        if obj["asset"] == "primitive:open_box"
+    ]
+    candidates = {}
+    for name, obj in sorted(collection.scene.objects.items()):
+        if obj["asset"] != "primitive:cube":
+            continue
+        size = np.asarray(obj["size"])
+        for _ in range(100):
+            position = rng.uniform(obj["position_min"], obj["position_max"])
+            if all(
+                np.any(
+                    np.abs(position[:2] - center[:2])
+                    > (size[:2] + other[:2]) / 2 + 0.02
+                )
+                for center, other in occupied
+            ):
+                candidates[name] = position
+                occupied.append((position, size))
+                break
+        else:
+            raise ValueError(f"Could not sample separated tabletop object: {name}")
+    return candidates
 
 
 def initial_command(deployment):

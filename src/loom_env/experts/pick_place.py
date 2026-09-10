@@ -65,8 +65,8 @@ class PickPlaceExpert:
         elif self.stage in {"transfer", "lower"}:
             hand = region.copy()
             hand[2] += (
-                self.collection.task.parameters["region_size"][2] / 2
-                + self.collection.task.parameters["object_size"][2] / 2
+                self.collection.scene.objects[self.receptacle]["size"][2] / 2
+                + self.collection.scene.objects[self.obj]["size"][2] / 2
                 + self.HAND_TO_GRASP
             )
             hand[2] += 0.10 if self.stage == "transfer" else 0.025

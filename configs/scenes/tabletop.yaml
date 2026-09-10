@@ -3,13 +3,38 @@ objects:
   cube:
     asset: primitive:cube
     category: graspable_object
+    description: 红色方块
+    size:
+    - 0.04
+    - 0.04
+    - 0.04
+    color:
+    - 0.92
+    - 0.16
+    - 0.1
+    position_min:
+    - 0.38
+    - -0.12
+    - 0.775
+    position_max:
+    - 0.43
+    - -0.05
+    - 0.775
   container:
     asset: primitive:open_box
     category: receptacle
+    description: 绿色容器
+    size:
+    - 0.14
+    - 0.14
+    - 0.1
+    color:
+    - 0.16
+    - 0.4
+    - 0.3
+    position:
+    - 0.58
+    - 0.08
+    - 0.81
 parameters:
   table_height: 0.75
-  # Candidates are settled and measured before constructing EpisodeSpec.
-  cube_position_min: [0.38, -0.12, 0.775]
-  cube_position_max: [0.43, -0.05, 0.775]
-  # Center of the internal region; 1 cm floor rests on the table.
-  container_position: [0.58, 0.08, 0.81]

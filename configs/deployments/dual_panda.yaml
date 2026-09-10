@@ -1,4 +1,4 @@
-# Joint/TCP mappings passed physics and FK checks; task reachability remains to be validated.
+# Panda tabletop baseline; validation scope is recorded in docs/embodiments.md.
 # Limits: the Franka URDF shipped with the pinned cuRobo version.
 id: dual_panda_tabletop
 control_type: joint_position
@@ -42,7 +42,7 @@ cameras:
     height: 480
     period_steps: 1
     parent_frame: world
-    pose: [2.0, 0.0, 1.9, 0.3681179873103491, 0.3681179873103491, 0.6037293660396003, 0.6037293660396003]
+    pose: [-0.25, 0.0, 1.55, -0.25929940790384143, 0.25929940790384143, 0.6578478677176944, -0.6578478677176944]
   - name: left_wrist
     width: 640
     height: 480

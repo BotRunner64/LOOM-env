@@ -44,13 +44,11 @@ def test_false_positive_placements_are_rejected(spec, frame_factory, condition):
 
 
 def test_rotation_aware_containment(spec, frame_factory):
-    params = {
-        **spec.collection.task.parameters,
-        "object_size": [0.10, 0.02, 0.04],
-        "region_size": [0.04, 0.12, 0.1],
-    }
+    objects = {name: dict(obj) for name, obj in spec.collection.scene.objects.items()}
+    objects["cube"]["size"] = [0.10, 0.02, 0.04]
+    objects["container"]["size"] = [0.04, 0.12, 0.1]
     task = PlaceTask(
-        replace(spec.collection, task=replace(spec.collection.task, parameters=params))
+        replace(spec.collection, scene=replace(spec.collection.scene, objects=objects))
     )
     world = {
         key: value.copy() for key, value in frame_factory(spec).world_state.items()
@@ -84,3 +82,37 @@ def test_contact_roundoff_tolerance_does_not_accept_protrusion(spec, frame_facto
     protruding = frame_factory(spec, position=(0.55002, 0.0, 0.8)).world_state
     task.reset(protruding)
     assert task.update(protruding, 0.25).outcome is None
+
+
+@pytest.mark.parametrize(
+    "moved, destination, success",
+    [
+        ("blue_cube", "green_container", False),
+        ("red_cube", "yellow_container", False),
+        ("red_cube", "green_container", True),
+    ],
+)
+def test_success_respects_both_object_and_container_binding(
+    moved, destination, success
+):
+    from pathlib import Path
+    from loom_env.specs.config import load_collection
+    from loom_env.environments.tabletop import sample_objects
+
+    collection = load_collection(
+        Path(__file__).resolve().parents[1] / "configs/collection/red_to_green.yaml"
+    )
+    world = {}
+    for name, position in sample_objects(collection, 0).items():
+        world[f"{name}/pose_world"] = np.r_[position, [0, 0, 0, 1]]
+        world[f"{name}/velocity_world"] = np.zeros(6)
+        world[f"{name}/grasped_by"] = np.zeros(2, dtype=bool)
+    for name in ("green_container", "yellow_container"):
+        world[f"{name}/region_pose_world"] = np.r_[
+            collection.scene.objects[name]["position"], [0, 0, 0, 1]
+        ]
+    task = PlaceTask(collection)
+    task.reset(world)
+    world[f"{moved}/pose_world"] = world[f"{destination}/region_pose_world"].copy()
+    outcome = task.update(world, 0.25).outcome
+    assert (outcome is not None and outcome.code == "success") is success

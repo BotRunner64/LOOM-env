@@ -82,7 +82,7 @@ class EpisodeRunner:
             deployment = spec.collection.deployment
             self.source.reset(
                 EpisodeInput(
-                    instruction=spec.collection.task.instruction,
+                    instruction=spec.collection.instruction,
                     action_descriptor=deployment.action_descriptor(),
                     observation_descriptor=observation_shapes(deployment),
                     context={} if context is None else context,

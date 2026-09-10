@@ -31,6 +31,7 @@ def main():
             spec = load_collection(args.path)
             result = {
                 "task": spec.task.id,
+                "instruction": spec.instruction,
                 "deployment": spec.deployment.id,
                 "scene": spec.scene.id,
                 "max_steps": spec.max_steps,

@@ -115,7 +115,9 @@ def main():
             # A measured initial state just beyond the tabletop, with gravity on.
             # Falling to failure is simulated; no task result or contact is injected.
             state = plain(spec.initial_state)
-            state["scene"]["rigid_object"]["cube"]["root_pose"][0][:3] = [
+            state["scene"]["rigid_object"][
+                f"object_{spec.collection.role_bindings['target_object']}"
+            ]["root_pose"][0][:3] = [
                 1.4,
                 0.0,
                 0.65,

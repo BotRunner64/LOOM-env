@@ -22,10 +22,12 @@ class PlaceTask:
         self.object_name = collection.role_bindings["target_object"]
         self.container_name = collection.role_bindings["container"]
         self.object_size = np.array(
-            vector(parameters.pop("object_size"), 3, "object_size")
+            vector(collection.scene.objects[self.object_name]["size"], 3, "object_size")
         )
         self.region_size = np.array(
-            vector(parameters.pop("region_size"), 3, "region_size")
+            vector(
+                collection.scene.objects[self.container_name]["size"], 3, "region_size"
+            )
         )
         self.settle_time = parameters.pop("settle_time")
         self.linear_speed = parameters.pop("max_linear_speed")

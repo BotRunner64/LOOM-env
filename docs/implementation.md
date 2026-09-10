@@ -34,7 +34,7 @@ ruff format --check src tests scripts
 
 `CollectionSpec` 组合任务、部署和场景预设，并绑定对象及操作角色。`EpisodeSpec` 保存已解析的 collection、接受的初态、实际采样参数、seed、资产版本、运行版本和来源信息。它表示采样结果，不能只用 seed 或场景采样范围代替实际初态。
 
-配置文件引用仅在 collection 的 `task`、`deployment`、`scene` 三处解析，路径相对 collection 文件；也可直接内联对象。不支持隐式继承、覆盖链或任意 Python 对象加载，重复 YAML 字段和未知结构字段会报错。任务和场景专属参数由对应实现解释和校验，桌面采样器目前只采样方块位置并验收支撑与稳定状态；统一资产准备入口会校验下载包及生成文件，共用本体适配器校验实际模型映射。
+配置文件引用仅在 collection 的 `task`、`deployment`、`scene` 三处解析，路径相对 collection 文件；也可直接内联对象。不支持隐式继承、覆盖链或任意 Python 对象加载，重复 YAML 字段和未知结构字段会报错。任务和场景专属参数由对应实现解释和校验，桌面采样器按物体名称排序，采样场景中的全部自由方块，检查桌面支撑及与所有容器、其他方块的分离，再验收物理稳定状态；统一资产准备入口会校验下载包及生成文件，共用本体适配器校验实际模型映射。
 
 目前只支持绝对关节位置命令；展开顺序固定为 `left/arm → left/gripper → right/arm → right/gripper`，机械臂单位为 rad。夹爪声明自己的单位、命令维度、范围，以及命令到物理关节目标的线性映射。维度和切片从部署生成，不单独维护。越界、NaN、缺臂和错误维度直接拒绝，不自动裁剪或归一化。Pose 固定为 xyz + quaternion xyzw，长度单位 m，四元数须归一化。CameraSpec 的 pose 表示 OpenGL 光学坐标系（-Z 朝前、+Y 朝上）相对 parent_frame 的位姿，运动预览与任务采集使用同一约定。
 
@@ -143,11 +143,11 @@ python scripts/export_video.py \
 
 默认部署记录 `front`、`left_wrist`、`right_wrist` 三路 640×480 RGB。前视固定在世界系，腕相机随各自末端连杆运动；安装参数及坐标约定见[三路相机](embodiments.md#三路相机)。单臂 7 个关节加夹爪宽度，双臂共 16 维动作；控制 20 Hz、物理 120 Hz。`--collection` 可指定 collection，`--max-steps` 改变回合预算，`--arm` 只改变操作角色，保持两臂安装位姿。运行结果不是 success 时返回非零退出码，Episode 保留真实 outcome。
 
-桌面、容器底板和四面侧壁的几何由 `tabletop_geometry()` 同时供 PhysX 和 cuRobo 使用。容器参数表示内部验收区域中心，底板厚 1 cm；方块质量 50 g、摩擦系数 1，机器人沿用高刚度 PD 和连杆重力补偿，方块始终受重力与真实接触作用。候选位置先检查与容器分离，再要求机器人位置／速度、方块速度连续稳定 0.25 秒。已接受的关节、根位姿及速度、控制目标都写入 Episode。恢复使用原生 `reset_to()`，不再随机采样，稳定化步骤不进入轨迹。
+桌面及所有容器的底板和四面侧壁由 `tabletop_geometry()` 同时供正式环境、运动预览和 cuRobo 使用。容器参数表示内部验收区域中心，底板厚 1 cm；方块质量 50 g、摩擦系数 1，机器人沿用高刚度 PD 和连杆重力补偿，方块始终受重力与真实接触作用。候选位置先检查与容器分离，再要求机器人位置／速度、方块速度连续稳定 0.25 秒。已接受的关节、根位姿及速度、控制目标都写入 Episode。恢复使用原生 `reset_to()`，不再随机采样，稳定化步骤不进入轨迹。
 
 专家由接近、下降、闭合、抬升、搬运、降低、释放、撤离和等待阶段组成。目标使用 Panda `panda_hand` 到指间抓取中心沿局部 +Z 的 0.1034 m 偏移。每段从实测关节状态规划，cuRobo 的轨迹按关节名提取，并用 2 倍时间缩放执行；每段末尾等待实测跟踪收敛，闭合和释放也有反馈超时。默认在盒口上方释放，再由重力落到盒底；Task 一旦确认完整入盒、释放且持续静止，就终止回合，可能早于撤离结束。
 
-规划启用本臂自碰撞、桌面和容器碰撞，并用保守包围盒覆盖保持臂的官方碰撞球。每段重新读取保持臂状态，执行中监测其保持误差。下降和初次抬升属于接触操作，允许接触目标方块；初次抬升后才将实测方块相对位姿转换为 8 个覆盖立方体的附件碰撞球，用于搬运和降低阶段。附件只修改规划几何，不建立 PhysX 固定连接，不改变方块的物理运动。当前 cuRobo 0.8 的高层附件属性引用了不存在的求解器成员，因此适配器显式创建其原生 AttachmentManager，并检查各求解器共用碰撞参数。
+规划启用本臂自碰撞、桌面和容器碰撞，并用保守包围盒覆盖保持臂的官方碰撞球。每段重新读取保持臂状态和全部自由物体位姿，执行中监测保持臂误差。未选中方块始终作为规划障碍物，目标方块只在接触下降／抬升或已附着规划几何时从普通障碍物中移除。下降和初次抬升属于接触操作，允许接触目标方块；初次抬升后才将实测方块相对位姿转换为 8 个覆盖立方体的附件碰撞球，用于搬运和降低阶段。附件只修改规划几何，不建立 PhysX 固定连接，不改变方块的物理运动。当前 cuRobo 0.8 的高层附件属性引用了不存在的求解器成员，因此适配器显式创建其原生 AttachmentManager，并检查各求解器共用碰撞参数。
 
 抓持布尔值由四个原生接触传感器提供：每个手指只过滤它与方块的接触；同一夹爪须同时有大于 0.2 N 的相向接触力、合理的实测开度，并且方块位于两指之间。接触力原始值也记录为真值。专家进入搬运前还要求方块实际离桌至少 12 cm；夹爪命令、规划成功和技能阶段都不直接决定任务结果。
 
@@ -164,7 +164,7 @@ python scripts/check_pick_place.py \
   --output-dir outputs/panda-verification
 ```
 
-重放从完整初态恢复，逐条执行已保存的原始动作，不重新规划。每个控制时刻比较左右关节、夹爪、TCP 位置／旋转和方块位置／旋转；完整动作列表执行后再次计算物理任务结果。报告单独存放，既不覆盖原 Episode，也不要求 RTX 图像逐像素确定。初态误差阈值 1e-5；轨迹位置阈值 5 mm、关节／TCP 角度 0.03 rad、夹爪 2 mm、方块姿态 0.1 rad。报告保留实际误差和阈值，不只返回布尔值。
+重放从完整初态恢复，逐条执行已保存的原始动作，不重新规划。每个控制时刻比较左右关节、夹爪、TCP 位置／旋转和所有自由方块的位置／旋转；完整动作列表执行后再次计算物理任务结果。报告单独存放，既不覆盖原 Episode，也不要求 RTX 图像逐像素确定。初态误差阈值 1e-5；轨迹位置阈值 5 mm、关节／TCP 角度 0.03 rad、夹爪 2 mm、方块姿态 0.1 rad。报告保留实际误差和阈值，不只返回布尔值。
 
 验收入口还会先运动双臂再恢复初态，记录保持超时、桌外方块自由跌落失败，并在第二次写帧中触发真实写入中断，确认 `.incomplete` 不被索引。最后在同一初态和安装布局下交换操作角色再执行专家。
 
@@ -194,3 +194,64 @@ python scripts/check_pick_place.py \
 Panda 三相机抓取、物理重放、多频率采样及运动后重置均已验证。重放使用全部 208 个动作，任务结果为 success；初态物理误差为 0，轨迹误差在原有阈值内。103 项单元测试、Ruff 和格式检查通过。
 
 [三视角同屏视频](../outputs/cameras/panda-three-view-pick-place-final.mp4)由最终重放的三路原始 RGB 导出，20 fps、209 帧；[汇总报告](../outputs/cameras/validation.json)包含物理重放、安装变换、多频率与初帧 RGB 检查。
+
+
+## Panda 工作区与目标选择
+
+Panda 保持原基座间距 0.8 m 和已验证的初始关节姿态。主相机位于机器人侧 `(-0.25, 0, 1.55)` m，斜俯视 `(0.45, 0, 0.80)` m；左右腕相机的刚性安装参数保持在 deployment 中。视野以实际接近、抓取、搬运、放置阶段验收。
+
+场景对象的 `size`、`color`、`description` 和位置由 `scene.objects` 唯一维护。方块配置 `position_min`／`position_max`，容器配置固定 `position`（内部验收区域中心）和 `size`（内部尺寸）。本轮方块为 4 cm、50 g，容器壁厚 1 cm。`scene.parameters` 只保存 `table_height`。任务参数只保留释放、稳定与失败阈值。
+
+同一个 `put_cube_in_container` 任务模板使用 `{target_object}` 和 `{container}`；`CollectionSpec.instruction` 由角色绑定对象的 `description` 生成，Runner 将具体指令传给动作源。模板只接受角色名，不支持属性访问、索引、格式规格或转换。Episode 中的完整配置足以重建该指令。角色绑定供专家及成功判据使用，物体真值仍不进入模型观测。
+
+| Collection | 场景与目标 |
+| --- | --- |
+| `pick_place.yaml` | 单红块、单绿盒基线 |
+| `red_to_green.yaml` | 两块两盒，红块→绿盒 |
+| `blue_to_green.yaml` | 相同场景，蓝块→绿盒 |
+| `red_to_yellow.yaml` | 相同场景，红块→黄盒 |
+| `red_to_green_crossed.yaml` | 交换两块和两盒的位置，红块→绿盒 |
+
+三个双物体目标组合引用同一个场景文件。同一种子产生相同候选布局，采样不依赖目标绑定；交叉布局让颜色和固定空间位置分离。所有方块的物理位姿、速度、两臂抓持证据和每指接触力均被记录，重放比较也覆盖未选中物体。抓错物体或放错容器不会满足目标任务。
+
+```bash
+python scripts/collect.py --collection configs/collection/red_to_green.yaml \
+  --output-dir outputs/tabletop_choices --episode-id red-green --episodes 2 --seed 0
+python scripts/collect.py --collection configs/collection/blue_to_green.yaml \
+  --output-dir outputs/tabletop_choices --episode-id blue-green --arm left --seed 0
+python scripts/preview_motion.py --collection configs/collection/red_to_green.yaml \
+  --output-dir outputs/tabletop_preview --episode-id choices-motion --seed 0
+```
+
+导出完整三视角视频（图像上方显示阶段及时间，不遮挡原始画面）：
+
+```bash
+python scripts/export_video.py outputs/tabletop_choices/episodes/red-green-0000 \
+  outputs/tabletop_choices/red-green.mp4 \
+  --camera front left_wrist right_wrist --label "Red cube to green container"
+```
+
+这些组合复用已有抓取放置专家，属于同一任务族的目标选择；多物体顺序整理、Context 配对输入和第二种本体的抓取适配仍是后续工作。资产生成标记更新为 `tabletop-v2`；历史 Episode 保持原样，旧场景快照的物理重放应使用生成它的代码版本。本轮新配置不保留旧场景字段适配。
+
+
+### 本轮实测（2026-09-10）
+
+| 案例 | 操作臂／种子 | 动作数 | 结果 |
+| --- | --- | --- | --- |
+| 单方块基线 | 右／0，左／同一初态 | 208，193 | 均 success |
+| 双物体红块→绿盒 | 右／0、1 | 226，225 | 均 success |
+| 双物体蓝块→绿盒 | 右／0，左／0 | 207，209 | 均 success |
+| 双物体红块→黄盒 | 右／0 | 207 | success |
+| 交叉布局红块→绿盒 | 右／0 | 207 | success |
+
+8 段专家轨迹均通过物理任务判据；逐帧检查确认只有目标物体被抓持和抬升，未选中物体位移小于 5 mm。三个目标组合及蓝块左臂案例在种子 0 下的两臂关节、夹爪、TCP 和两个方块初始位姿完全一致。相机位姿与实测末端固定变换一致，位置误差低于 0.1 mm、旋转误差低于 0.001 rad；主相机的目标中心投影全程在画面内，并检查了抓取阶段腕相机目标投影及关键帧遮挡。此验收只覆盖这些样本，不代表整个采样范围的成功率。
+
+Panda 基线的运动后重置、209 帧物理重放、保持超时、桌外跌落、写入中断和角色交换全部通过。双物体轨迹的 227 帧独立物理重放同样通过，两臂和所有自由方块的比较误差均为 0。共用场景预览完成 240 个动作、241 帧，候选布局与正式基线一致。预览首次运行发现 USD 材质接口要求元组向量；修复边界转换后重跑通过，失败日志保留。
+
+114 项单元测试、Ruff 和格式检查通过。7 段三视角成品视频为 1920×576、20 FPS，1464 帧均完成解码检查。代码保留配置、源码和测试，录制与转换产物在 Git 忽略的 `outputs/` 下。
+
+- [三视角演示页面](../outputs/tabletop_choices/index.html)
+- [任务、相机、初态配对与预览汇总](../outputs/tabletop_choices/validation.json)
+- [Panda 基线验收](../outputs/panda_baseline/checks/verification.json)
+- [双物体重放报告](../outputs/tabletop_choices/replay/red-green-001-0000-replay-comparison.json)
+- [视频完整性报告](../outputs/tabletop_choices/videos/validation.json)

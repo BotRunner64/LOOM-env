@@ -12,6 +12,7 @@ from dataclasses import dataclass, fields, is_dataclass
 import math
 from pathlib import Path
 import re
+from string import Formatter
 from types import MappingProxyType
 from typing import Any
 
@@ -388,6 +389,27 @@ class CollectionSpec:
             identifier(role)
         object.__setattr__(self, "role_bindings", frozen_json(self.role_bindings))
         object.__setattr__(self, "arm_roles", frozen_json(self.arm_roles))
+        # Templates reference role descriptions only; no attribute/index access.
+        _ = self.instruction
+
+    @property
+    def instruction(self) -> str:
+        descriptions = {}
+        for _, field, format_spec, conversion in Formatter().parse(
+            self.task.instruction
+        ):
+            if field is None:
+                continue
+            if field not in self.role_bindings or format_spec or conversion:
+                raise ValueError(f"Invalid instruction role placeholder: {field}")
+            obj = self.scene.objects[self.role_bindings[field]]
+            description = obj.get("description")
+            if not isinstance(description, str) or not description.strip():
+                raise ValueError(
+                    f"Instruction role {field} requires an object description"
+                )
+            descriptions[field] = description
+        return self.task.instruction.format_map(descriptions)
 
 
 @dataclass(frozen=True)

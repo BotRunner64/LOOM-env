@@ -20,6 +20,7 @@ from pathlib import Path
 
 import numpy as np
 
+from loom_env.environments.tabletop import sample_objects, tabletop_geometry
 from loom_env.runtime.runner import EpisodeRunner
 from loom_env.runtime.motion import DURATION, MotionCheck, MotionSource, gripper_command
 from loom_env.specs.config import (
@@ -45,18 +46,23 @@ def main():
         "--episode-id",
         default="motion-" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ"),
     )
-    parser.add_argument(
-        "--deployment", type=Path, default=ROOT / "configs/deployments/dual_panda.yaml"
-    )
+    parser.add_argument("--deployment", type=Path)
     parser.add_argument("--asset-root", type=Path, default=ROOT / ".cache/assets")
+    parser.add_argument(
+        "--collection", type=Path, default=ROOT / "configs/collection/pick_place.yaml"
+    )
+    parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
     if os.environ.get("OMNI_KIT_ACCEPT_EULA", "").upper() not in {"Y", "YES", "1"}:
         parser.error(
             "Set OMNI_KIT_ACCEPT_EULA=YES after accepting NVIDIA's Omniverse EULA"
         )
 
-    collection = load_collection(ROOT / "configs/collection/pick_place.yaml")
-    collection = replace(collection, deployment=load_deployment(args.deployment))
+    collection = load_collection(args.collection)
+    if args.deployment:
+        collection = replace(collection, deployment=load_deployment(args.deployment))
+    geometry = tabletop_geometry(collection)
+    candidates = sample_objects(collection, args.seed)
     deployment = collection.deployment
     source = MotionSource(deployment)
 
@@ -66,9 +72,10 @@ def main():
     app = launcher.app
     try:
         import isaaclab.sim as sim_utils
-        from isaaclab.assets import RigidObject, RigidObjectCfg
+        from isaaclab.assets import RigidObject
         from isaaclab.sensors import Camera
         from loom_env.embodiments.cameras import CameraMounts, camera_config
+        from loom_env.environments.isaac_lab import tabletop_object_config
         from loom_env.embodiments.isaac_lab import DualArmArticulation
         from isaaclab_physx.physics import PhysxCfg
 
@@ -77,73 +84,37 @@ def main():
                 dt=deployment.physics_dt,
                 device="cuda:0",
                 physics=PhysxCfg(),
+                render=sim_utils.RenderCfg(ambient_light_intensity=0.3),
             )
         )
 
-        def block(path, size, position, color, *, collision=True):
+        def block(path, size, position, color):
             cfg = sim_utils.CuboidCfg(
-                size=size,
-                collision_props=sim_utils.CollisionPropertiesCfg()
-                if collision
-                else None,
+                size=tuple(float(v) for v in size),
+                collision_props=sim_utils.CollisionPropertiesCfg(
+                    contact_offset=0.002, rest_offset=0.0
+                ),
                 visual_material=sim_utils.PreviewSurfaceCfg(
-                    diffuse_color=color, roughness=0.6
+                    diffuse_color=tuple(float(v) for v in color)
                 ),
             )
-            cfg.func(path, cfg, translation=position)
+            cfg.func(path, cfg, translation=tuple(float(v) for v in position))
 
-        block("/World/Floor", (8, 8, 0.1), (0, 0, -0.05), (0.12, 0.15, 0.19))
-        block("/World/Table", (1.6, 1.8, 0.08), (0.45, 0, 0.71), (0.43, 0.47, 0.51))
-        light = sim_utils.DomeLightCfg(intensity=2200.0)
+        ground = sim_utils.GroundPlaneCfg()
+        ground.func("/World/Ground", ground)
+        for name, box in geometry.items():
+            block(f"/World/geometry_{name}", box["size"], box["position"], box["color"])
+        light = sim_utils.DomeLightCfg(intensity=600)
         light.func("/World/Light", light)
         robot = DualArmArticulation(deployment, args.asset_root)
-        for side, color in (("left", (0.04, 0.6, 0.8)), ("right", (0.95, 0.48, 0.06))):
-            arm = deployment.arms[side]
-            block(
-                f"/World/{side}_marker",
-                (0.25, 0.25, 0.008),
-                (arm.base_pose[0], arm.base_pose[1], 0.754),
-                color,
-                collision=False,
+        objects = {
+            name: RigidObject(
+                tabletop_object_config(
+                    collection.scene.objects[name], f"/World/object_{name}", position
+                )
             )
-        cube = RigidObject(
-            RigidObjectCfg(
-                prim_path="/World/Cube",
-                spawn=sim_utils.CuboidCfg(
-                    size=collection.task.parameters["object_size"],
-                    rigid_props=sim_utils.RigidBodyPropertiesCfg(),
-                    collision_props=sim_utils.CollisionPropertiesCfg(),
-                    mass_props=sim_utils.MassPropertiesCfg(mass=0.05),
-                    visual_material=sim_utils.PreviewSurfaceCfg(
-                        diffuse_color=(0.92, 0.16, 0.10)
-                    ),
-                ),
-                init_state=RigidObjectCfg.InitialStateCfg(pos=(0.58, -0.06, 0.79)),
-            )
-        )
-        # A local geometric container provides scene context; nothing is grasped.
-        sx, sy, sz = collection.task.parameters["region_size"]
-        cx, cy, floor_z, wall = 0.60, 0.18, 0.75, 0.01
-        block(
-            "/World/Container/base",
-            (sx + 2 * wall, sy + 2 * wall, wall),
-            (cx, cy, floor_z + wall / 2),
-            (0.16, 0.40, 0.30),
-        )
-        for index, (size, offset) in enumerate(
-            (
-                ((wall, sy + 2 * wall, sz), (-(sx + wall) / 2, 0)),
-                ((wall, sy + 2 * wall, sz), ((sx + wall) / 2, 0)),
-                ((sx, wall, sz), (0, -(sy + wall) / 2)),
-                ((sx, wall, sz), (0, (sy + wall) / 2)),
-            )
-        ):
-            block(
-                f"/World/Container/wall{index}",
-                size,
-                (cx + offset[0], cy + offset[1], floor_z + wall + sz / 2),
-                (0.16, 0.40, 0.30),
-            )
+            for name, position in candidates.items()
+        }
 
         cameras = {
             spec.name: Camera(camera_config(spec)) for spec in deployment.cameras
@@ -152,7 +123,8 @@ def main():
         sim.reset()
         robot.initialize()
         camera_mounts = CameraMounts(deployment.cameras, cameras, robot.robots)
-        cube.reset()
+        for obj in objects.values():
+            obj.reset()
         for camera in cameras.values():
             camera.reset()
 
@@ -161,7 +133,8 @@ def main():
                 robot.write_data_to_sim()
                 sim.step(render=substep == deployment.decimation - 1)
                 robot.update(deployment.physics_dt)
-                cube.update(deployment.physics_dt)
+                for obj in objects.values():
+                    obj.update(deployment.physics_dt)
 
         def settle(command):
             robot.reset(command)
@@ -291,9 +264,12 @@ def main():
             return Frame(
                 Observation(step * deployment.control_dt, values),
                 {
-                    "cube/pose_world": cube.data.root_link_pose_w.torch[0]
-                    .cpu()
-                    .numpy(),
+                    **{
+                        f"{name}/pose_world": obj.data.root_link_pose_w.torch[0]
+                        .cpu()
+                        .numpy()
+                        for name, obj in objects.items()
+                    },
                     "diagnostic/time": np.array(step * deployment.control_dt),
                     "diagnostic/tracking_error": np.asarray(errors),
                     "diagnostic/gripper_command": np.asarray(grippers),
@@ -336,14 +312,17 @@ def main():
         spec = EpisodeSpec(
             id=args.episode_id,
             collection=collection,
-            seed=0,
+            seed=args.seed,
             initial_state={
                 "robot": {
                     key: value.tolist()
                     for key, value in initial.observation.values.items()
                     if key.startswith("robot/")
                 },
-                "cube_pose_world": initial.world_state["cube/pose_world"].tolist(),
+                "object_pose_world": {
+                    name: initial.world_state[f"{name}/pose_world"].tolist()
+                    for name in objects
+                },
                 "camera_pose_world": {
                     name: initial.world_state[f"cameras/{name}/pose_world"].tolist()
                     for name in cameras
@@ -355,19 +334,17 @@ def main():
                 },
             },
             sampled_parameters={
-                "randomization": "none",
-                "cube_position": [0.58, -0.06, 0.79],
-                "container_position": [cx, cy, floor_z],
-                "object_size": [0.04] * 3,
-                "region_size": [sx, sy, sz],
+                "object_candidates": {
+                    name: position.tolist() for name, position in candidates.items()
+                },
                 "controllers": robot.controller_parameters,
                 "reset_checks": reset_checks,
                 "gravity_compensation": True,
             },
             asset_versions={
                 **robot.asset_versions,
-                "primitive:cube": "preview-v1",
-                "primitive:open_box": "preview-v1",
+                "primitive:cube": "tabletop-v2",
+                "primitive:open_box": "tabletop-v2",
             },
             runtime_versions={
                 name: importlib.metadata.version(name)

@@ -34,7 +34,7 @@ from loom_env.embodiments.isaac_lab import DualArmArticulation, articulation_con
 from loom_env.environments.tabletop import (
     grasp_evidence,
     initial_command,
-    sample_cube,
+    sample_objects,
     tabletop_geometry,
 )
 from loom_env.specs.config import ARMS, EpisodeSpec, plain
@@ -143,55 +143,11 @@ def policy_signal(env, key):
     )
 
 
-def environment_config(collection, asset_root):
-    if any(arm.asset != PANDA_ASSET for arm in collection.deployment.arms.values()):
-        raise ValueError(
-            "The first contact-based place environment supports dual Panda"
-        )
-    if collection.task.id != "put_cube_in_container":
-        raise ValueError("Tabletop environment requires put_cube_in_container")
-    geometry = tabletop_geometry(collection)
-    scene = InteractiveSceneCfg(num_envs=1, env_spacing=3.0, replicate_physics=False)
-    prefix = "{ENV_REGEX_NS}"
-    for side in ARMS:
-        cfg, _ = articulation_config(collection.deployment.arms[side], asset_root)
-        cfg.prim_path = f"{prefix}/{side}_robot"
-        cfg.spawn.activate_contact_sensors = True
-        setattr(scene, side, cfg)
-        for finger in ("left", "right"):
-            setattr(
-                scene,
-                f"contact_{side}_{finger}",
-                ContactSensorCfg(
-                    prim_path=f"{prefix}/{side}_robot/panda_{finger}finger",
-                    filter_prim_paths_expr=[f"{prefix}/cube"],
-                    max_contact_data_count_per_prim=64,
-                ),
-            )
-    for name, box in geometry.items():
-        setattr(
-            scene,
-            name,
-            AssetBaseCfg(
-                prim_path=f"{prefix}/{name}",
-                spawn=sim_utils.CuboidCfg(
-                    size=tuple(box["size"]),
-                    collision_props=sim_utils.CollisionPropertiesCfg(
-                        contact_offset=0.002, rest_offset=0.0
-                    ),
-                    visual_material=sim_utils.PreviewSurfaceCfg(
-                        diffuse_color=(0.43, 0.47, 0.51)
-                        if name == "table"
-                        else (0.16, 0.40, 0.30)
-                    ),
-                ),
-                init_state=AssetBaseCfg.InitialStateCfg(pos=tuple(box["position"])),
-            ),
-        )
-    scene.cube = RigidObjectCfg(
-        prim_path=f"{prefix}/cube",
+def tabletop_object_config(obj, prim_path, position):
+    return RigidObjectCfg(
+        prim_path=prim_path,
         spawn=sim_utils.CuboidCfg(
-            size=tuple(collection.task.parameters["object_size"]),
+            size=tuple(obj["size"]),
             rigid_props=sim_utils.RigidBodyPropertiesCfg(
                 solver_position_iteration_count=16,
                 solver_velocity_iteration_count=4,
@@ -205,13 +161,66 @@ def environment_config(collection, asset_root):
                 static_friction=1.0, dynamic_friction=1.0, restitution=0.0
             ),
             visual_material=sim_utils.PreviewSurfaceCfg(
-                diffuse_color=(0.92, 0.16, 0.10)
+                diffuse_color=tuple(obj["color"])
             ),
         ),
-        init_state=RigidObjectCfg.InitialStateCfg(
-            pos=tuple(sample_cube(collection, 0))
-        ),
+        init_state=RigidObjectCfg.InitialStateCfg(pos=tuple(position)),
     )
+
+
+def environment_config(collection, asset_root):
+    if any(arm.asset != PANDA_ASSET for arm in collection.deployment.arms.values()):
+        raise ValueError(
+            "The first contact-based place environment supports dual Panda"
+        )
+    if collection.task.id != "put_cube_in_container":
+        raise ValueError("Tabletop environment requires put_cube_in_container")
+    geometry = tabletop_geometry(collection)
+    candidates = sample_objects(collection, 0)
+    scene = InteractiveSceneCfg(num_envs=1, env_spacing=3.0, replicate_physics=False)
+    prefix = "{ENV_REGEX_NS}"
+    for side in ARMS:
+        cfg, _ = articulation_config(collection.deployment.arms[side], asset_root)
+        cfg.prim_path = f"{prefix}/{side}_robot"
+        cfg.spawn.activate_contact_sensors = True
+        setattr(scene, side, cfg)
+        for finger in ("left", "right"):
+            setattr(
+                scene,
+                f"contact_{side}_{finger}",
+                ContactSensorCfg(
+                    prim_path=f"{prefix}/{side}_robot/panda_{finger}finger",
+                    filter_prim_paths_expr=[
+                        f"{prefix}/object_{name}" for name in candidates
+                    ],
+                    max_contact_data_count_per_prim=64,
+                ),
+            )
+    for name, box in geometry.items():
+        setattr(
+            scene,
+            f"geometry_{name}",
+            AssetBaseCfg(
+                prim_path=f"{prefix}/geometry_{name}",
+                spawn=sim_utils.CuboidCfg(
+                    size=tuple(box["size"]),
+                    collision_props=sim_utils.CollisionPropertiesCfg(
+                        contact_offset=0.002, rest_offset=0.0
+                    ),
+                    visual_material=sim_utils.PreviewSurfaceCfg(
+                        diffuse_color=tuple(box["color"])
+                    ),
+                ),
+                init_state=AssetBaseCfg.InitialStateCfg(pos=tuple(box["position"])),
+            ),
+        )
+    for name, candidate in candidates.items():
+        obj = collection.scene.objects[name]
+        setattr(
+            scene,
+            f"object_{name}",
+            tabletop_object_config(obj, f"{prefix}/object_{name}", candidate),
+        )
     scene.light = AssetBaseCfg(
         prim_path="/World/Light", spawn=sim_utils.DomeLightCfg(intensity=600)
     )
@@ -261,6 +270,13 @@ class TabletopEnvironment(ManagerBasedEnv):
     def __init__(self, collection, asset_root=Path(".cache/assets")):
         self.collection = collection
         self.asset_root = asset_root
+        self.object_names = tuple(
+            sorted(
+                name
+                for name, obj in collection.scene.objects.items()
+                if obj["asset"] == "primitive:cube"
+            )
+        )
         self.control_step = 0
         self.camera_steps, self.camera_images, self.camera_poses = {}, {}, {}
         self.camera_sync_step = None
@@ -292,52 +308,57 @@ class TabletopEnvironment(ManagerBasedEnv):
         super().load_managers()
 
     def world_state(self):
-        pose = self.scene["cube"].data.root_pose_w.torch[0].cpu().numpy().copy()
-        velocity = self.scene["cube"].data.root_vel_w.torch[0].cpu().numpy().copy()
-        contacts, grasped = [], []
-        for side in ARMS:
-            forces = np.stack(
-                [
-                    self.scene[f"contact_{side}_{finger}"]
-                    .data.force_matrix_w.torch[0, 0, 0]
+        world = {}
+        for index, name in enumerate(self.object_names):
+            obj = self.collection.scene.objects[name]
+            data = self.scene[f"object_{name}"].data
+            pose = data.root_pose_w.torch[0].cpu().numpy().copy()
+            velocity = data.root_vel_w.torch[0].cpu().numpy().copy()
+            contacts, grasped = [], []
+            for side in ARMS:
+                forces = np.stack(
+                    [
+                        self.scene[f"contact_{side}_{finger}"]
+                        .data.force_matrix_w.torch[0, 0, index]
+                        .cpu()
+                        .numpy()
+                        for finger in ("left", "right")
+                    ]
+                )
+                robot_data = self.robot.robots[side].data
+                hand = (
+                    robot_data.body_link_pose_w.torch[0, self.robot.tcp_ids[side]]
                     .cpu()
                     .numpy()
-                    for finger in ("left", "right")
-                ]
-            )
-            data = self.robot.robots[side].data
-            hand = (
-                data.body_link_pose_w.torch[0, self.robot.tcp_ids[side]].cpu().numpy()
-            )
-            local = Rotation.from_quat(hand[3:]).inv().apply(pose[:3] - hand[:3])
-            fingers = (
-                data.joint_pos.torch[0, self.robot.gripper_ids[side]].cpu().numpy()
-            )
-            contacts.append(forces)
-            grasped.append(
-                grasp_evidence(
-                    forces,
-                    fingers,
-                    local,
-                    self.collection.task.parameters["object_size"],
                 )
+                local = Rotation.from_quat(hand[3:]).inv().apply(pose[:3] - hand[:3])
+                fingers = (
+                    robot_data.joint_pos.torch[0, self.robot.gripper_ids[side]]
+                    .cpu()
+                    .numpy()
+                )
+                contacts.append(forces)
+                grasped.append(grasp_evidence(forces, fingers, local, obj["size"]))
+            world.update(
+                {
+                    f"{name}/pose_world": pose,
+                    f"{name}/velocity_world": velocity,
+                    f"{name}/grasped_by": np.asarray(grasped, dtype=bool),
+                    f"{name}/finger_contact_forces_world": np.asarray(contacts),
+                }
             )
-        obj = self.collection.role_bindings["target_object"]
-        receptacle = self.collection.role_bindings["container"]
-        return {
-            f"{obj}/pose_world": pose,
-            f"{obj}/velocity_world": velocity,
-            f"{obj}/grasped_by": np.asarray(grasped, dtype=bool),
-            f"{obj}/finger_contact_forces_world": np.asarray(contacts),
-            **{
+        for name, obj in self.collection.scene.objects.items():
+            if obj["asset"] == "primitive:open_box":
+                world[f"{name}/region_pose_world"] = np.r_[
+                    obj["position"], [0.0, 0.0, 0.0, 1.0]
+                ]
+        world.update(
+            {
                 f"cameras/{camera.name}/pose_world": self.camera_poses[camera.name]
                 for camera in self.collection.deployment.cameras
-            },
-            f"{receptacle}/region_pose_world": np.r_[
-                self.collection.scene.parameters["container_position"],
-                [0.0, 0.0, 0.0, 1.0],
-            ],
-        }
+            }
+        )
+        return world
 
     def frame(self):
         values = {
@@ -398,17 +419,19 @@ class TabletopEnvironment(ManagerBasedEnv):
         self.reset(seed=seed)
         command = initial_command(self.collection.deployment)
         self.robot.reset(command)
-        candidate = sample_cube(self.collection, seed)
-        self.scene["cube"].write_root_pose_to_sim_index(
-            root_pose=torch.tensor(
-                np.r_[candidate, [0, 0, 0, 1]][None],
-                device=self.device,
-                dtype=torch.float32,
+        candidates = sample_objects(self.collection, seed)
+        for name, candidate in candidates.items():
+            obj = self.scene[f"object_{name}"]
+            obj.write_root_pose_to_sim_index(
+                root_pose=torch.tensor(
+                    np.r_[candidate, [0, 0, 0, 1]][None],
+                    device=self.device,
+                    dtype=torch.float32,
+                )
             )
-        )
-        self.scene["cube"].write_root_velocity_to_sim_index(
-            root_velocity=torch.zeros((1, 6), device=self.device)
-        )
+            obj.write_root_velocity_to_sim_index(
+                root_velocity=torch.zeros((1, 6), device=self.device)
+            )
         stable = 0
         for _ in range(100):
             frame = self.step(command).frame
@@ -426,26 +449,29 @@ class TabletopEnvironment(ManagerBasedEnv):
                 < 0.01
                 for side in ARMS
             )
-            obj = self.collection.role_bindings["target_object"]
-            cube_stable = (
-                np.linalg.norm(frame.world_state[f"{obj}/velocity_world"]) < 0.01
+            objects_stable = all(
+                np.linalg.norm(frame.world_state[f"{name}/velocity_world"]) < 0.01
+                for name in candidates
             )
-            stable = stable + 1 if robot_stable and cube_stable else 0
+            stable = stable + 1 if robot_stable and objects_stable else 0
             if stable >= 5:
                 break
         else:
             raise RuntimeError("Candidate failed to settle within five seconds")
-        if (
-            np.linalg.norm(frame.world_state[f"{obj}/pose_world"][:2] - candidate[:2])
-            > 0.005
-            or abs(
-                frame.world_state[f"{obj}/pose_world"][2]
-                - self.collection.scene.parameters["table_height"]
-                - self.collection.task.parameters["object_size"][2] / 2
-            )
-            > 0.002
-        ):
-            raise RuntimeError("Candidate moved outside its accepted support pose")
+        for name, candidate in candidates.items():
+            measured = frame.world_state[f"{name}/pose_world"]
+            if (
+                np.linalg.norm(measured[:2] - candidate[:2]) > 0.005
+                or abs(
+                    measured[2]
+                    - self.collection.scene.parameters["table_height"]
+                    - self.collection.scene.objects[name]["size"][2] / 2
+                )
+                > 0.002
+            ):
+                raise RuntimeError(
+                    f"Candidate moved outside its accepted support pose: {name}"
+                )
         state = _tree_map(self.scene.get_state(), lambda v: v.cpu().tolist())
         return EpisodeSpec(
             id=episode_id,
@@ -453,7 +479,9 @@ class TabletopEnvironment(ManagerBasedEnv):
             seed=seed,
             initial_state={"scene": state, "control_targets": command.tolist()},
             sampled_parameters={
-                "cube_candidate": candidate.tolist(),
+                "object_candidates": {
+                    name: value.tolist() for name, value in candidates.items()
+                },
                 "settling_steps": self.control_step,
                 "controllers": self.robot.controller_parameters,
                 "gravity_compensation": True,
@@ -471,8 +499,8 @@ class TabletopEnvironment(ManagerBasedEnv):
             },
             asset_versions={
                 **self.robot.asset_versions,
-                "primitive:cube": "tabletop-v1",
-                "primitive:open_box": "tabletop-v1",
+                "primitive:cube": "tabletop-v2",
+                "primitive:open_box": "tabletop-v2",
             },
             runtime_versions={
                 name: importlib.metadata.version(name)

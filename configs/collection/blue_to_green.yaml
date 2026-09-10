@@ -1,0 +1,9 @@
+task: ../tasks/put_cube_in_container.yaml
+deployment: ../deployments/dual_panda.yaml
+scene: ../scenes/tabletop_choices.yaml
+role_bindings:
+  target_object: blue_cube
+  container: green_container
+arm_roles:
+  manipulator: right
+max_steps: 400

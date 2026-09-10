@@ -96,14 +96,14 @@ class PandaPlanner:
             boxes.append(
                 self._box(f"held_{i}", [2 * sphere[3]] * 3, np.r_[center, [0, 0, 0, 1]])
             )
-        if not allow_object_contact and not self.attached:
-            obj = self.collection.role_bindings["target_object"]
+        target = self.collection.role_bindings["target_object"]
+        for name, obj in self.collection.scene.objects.items():
+            if obj["asset"] != "primitive:cube":
+                continue
+            if name == target and (allow_object_contact or self.attached):
+                continue
             boxes.append(
-                self._box(
-                    "cube",
-                    self.collection.task.parameters["object_size"],
-                    truth[f"{obj}/pose_world"],
-                )
+                self._box(f"object_{name}", obj["size"], truth[f"{name}/pose_world"])
             )
         self.planner.update_world(Scene(cuboid=boxes))
         return len(boxes)
@@ -111,7 +111,7 @@ class PandaPlanner:
     def attach(self, observation, truth):
         """Planning geometry only; the simulator object remains a free rigid body."""
         obj = self.collection.role_bindings["target_object"]
-        size = np.asarray(self.collection.task.parameters["object_size"])
+        size = np.asarray(self.collection.scene.objects[obj]["size"])
         centers = np.asarray(list(product((-1, 1), repeat=3))) * size / 4
         # Each sphere covers one octant of the cube, including its corners.
         spheres = np.c_[centers, np.full(8, np.linalg.norm(size / 4))]

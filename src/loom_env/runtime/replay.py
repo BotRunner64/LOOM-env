@@ -62,18 +62,20 @@ class ReplayComparison:
                     * Rotation.from_quat(expected.values[key][3:].copy())
                 ).magnitude()
             )
-        obj = self.episode.spec.collection.role_bindings["target_object"]
-        actual, desired = (
-            frame.world_state[f"{obj}/pose_world"],
-            truth[f"{obj}/pose_world"],
-        )
-        errors["object_m"] = float(np.linalg.norm(actual[:3] - desired[:3]))
-        errors["object_rad"] = float(
-            (
-                Rotation.from_quat(actual[3:].copy()).inv()
-                * Rotation.from_quat(desired[3:].copy())
-            ).magnitude()
-        )
+        for name, obj in self.episode.spec.collection.scene.objects.items():
+            if obj["asset"] != "primitive:cube":
+                continue
+            actual, desired = (
+                frame.world_state[f"{name}/pose_world"],
+                truth[f"{name}/pose_world"],
+            )
+            errors[f"{name}_m"] = float(np.linalg.norm(actual[:3] - desired[:3]))
+            errors[f"{name}_rad"] = float(
+                (
+                    Rotation.from_quat(actual[3:].copy()).inv()
+                    * Rotation.from_quat(desired[3:].copy())
+                ).magnitude()
+            )
         if step == 0:
             self.initial_errors = errors.copy()
         for key, value in errors.items():
@@ -86,7 +88,15 @@ class ReplayComparison:
             key: 0.03 if key.endswith("_rad") else 0.005 for key in self.maximum_errors
         }
         limits.update(
-            {"left_gripper_m": 0.002, "right_gripper_m": 0.002, "object_rad": 0.1}
+            {
+                "left_gripper_m": 0.002,
+                "right_gripper_m": 0.002,
+                **{
+                    f"{name}_rad": 0.1
+                    for name, obj in self.episode.spec.collection.scene.objects.items()
+                    if obj["asset"] == "primitive:cube"
+                },
+            }
         )
         initial_ok = bool(self.initial_errors) and all(
             v < 1e-5 for v in self.initial_errors.values()

@@ -15,7 +15,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("episode", type=Path)
     parser.add_argument("output", type=Path)
-    parser.add_argument("--camera", default="front")
+    parser.add_argument("--camera", nargs="+", default=["front"])
     parser.add_argument("--label", default="Recorded simulation")
     args = parser.parse_args()
     if args.output.resolve().is_relative_to(args.episode.resolve()):
@@ -28,9 +28,14 @@ def main():
         parser.error(f"Unfinished output already exists: {temporary}")
     with EpisodeReader(args.episode) as episode:
         deployment = episode.spec.collection.deployment
-        if args.camera not in {camera.name for camera in deployment.cameras}:
-            parser.error(f"Camera not present in episode: {args.camera}")
-        prefix = f"cameras/{args.camera}"
+        available = {camera.name: camera for camera in deployment.cameras}
+        if len(set(args.camera)) != len(args.camera) or any(
+            name not in available for name in args.camera
+        ):
+            parser.error("Select distinct cameras present in the episode")
+        selected = [available[name] for name in args.camera]
+        width = sum(camera.width for camera in selected)
+        height = max(camera.height for camera in selected) + 96
         events = [
             event for event in episode.manifest["events"] if event["kind"] == "skill"
         ]
@@ -43,39 +48,36 @@ def main():
             macro_block_size=2,
             ffmpeg_params=["-movflags", "+faststart"],
         ) as writer:
-            last_rgb = None
+            last_rgb = {}
             for step, observation in enumerate(episode.observations()):
-                if bool(observation.values[f"{prefix}/valid"]):
-                    last_rgb = observation.values[f"{prefix}/rgb"]
-                if last_rgb is None:
-                    raise ValueError(
-                        "No valid camera image available at the initial frame"
-                    )
-                frame = Image.fromarray(last_rgb.copy())
+                frame = Image.new("RGB", (width, height), (17, 24, 35))
                 draw = ImageDraw.Draw(frame)
-                draw.rectangle((0, 0, frame.width, 72), fill=(17, 24, 35))
                 draw.text(
-                    (20, 10), "LOOM-env  |  " + args.label, fill="white", font_size=22
+                    (12, 8), "LOOM-env | " + args.label, fill="white", font_size=22
                 )
                 active = [event for event in events if event["step"] <= step]
                 phase = active[-1]["name"] if active else "Initial state"
-                draw.text((20, 42), phase, fill=(137, 212, 236), font_size=18)
-                draw.rectangle(
-                    (0, frame.height - 42, frame.width, frame.height), fill=(17, 24, 35)
+                status = (
+                    " | " + episode.manifest["outcome"]["code"]
+                    if step == len(episode)
+                    else ""
                 )
                 draw.text(
-                    (20, frame.height - 30),
-                    f"t = {observation.timestamp:05.2f} s   |   frame {step:03d}/{len(episode)}   |   {args.camera}",
-                    fill="white",
-                    font_size=17,
+                    (12, 40),
+                    f"{phase} | t={observation.timestamp:05.2f}s | {step}/{len(episode)}{status}",
+                    fill=(137, 212, 236),
+                    font_size=18,
                 )
-                if step == len(episode):
-                    draw.text(
-                        (frame.width - 250, frame.height - 30),
-                        "Outcome: " + episode.manifest["outcome"]["code"],
-                        fill=(137, 212, 236),
-                        font_size=17,
-                    )
+                x = 0
+                for camera in selected:
+                    prefix = f"cameras/{camera.name}"
+                    if bool(observation.values[f"{prefix}/valid"]):
+                        last_rgb[camera.name] = observation.values[f"{prefix}/rgb"]
+                    if camera.name not in last_rgb:
+                        raise ValueError(f"No valid initial image: {camera.name}")
+                    frame.paste(Image.fromarray(last_rgb[camera.name]), (x, 96))
+                    draw.text((x + 12, 72), camera.name, fill="white", font_size=18)
+                    x += camera.width
                 writer.append_data(np.asarray(frame))
                 if step == 0:
                     frame.save(args.output.with_suffix(".png"))
