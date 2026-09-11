@@ -14,14 +14,14 @@ def create_environment(collection, asset_root):
 
 
 def create_expert(collection, environment, asset_root):
-    from loom_env.experts.curobo import PandaPlanner
+    from loom_env.experts.curobo import ArmPlanner
 
     create_task(collection)
     try:
         factory = EXPERTS[collection.task.id]
     except KeyError as error:
         raise ValueError(f"No expert for task: {collection.task.id}") from error
-    planner = PandaPlanner(
+    planner = ArmPlanner(
         collection.deployment,
         collection.scene,
         collection.arm_roles["manipulator"],

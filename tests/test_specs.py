@@ -129,6 +129,7 @@ import loom_env.runtime.runner
 import loom_env.runtime.replay
 import loom_env.tasks.place
 import loom_env.embodiments.assets
+import loom_env.embodiments.frames
 import loom_env.runtime.motion
 """
     subprocess.run([sys.executable, "-c", script], check=True)

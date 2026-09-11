@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare cuRobo FK against every recorded measured TCP pose, without Isaac Sim."""
+"""Compare cuRobo FK against recorded TCP and optical poses, without Isaac Sim."""
 
 import argparse
 import json
@@ -17,7 +17,7 @@ from loom_env.embodiments.assets import (
     verify_asset,
 )
 from loom_env.specs.config import ARMS
-from loom_env.runtime.motion import gripper_mapping_error
+from loom_env.embodiments.commands import gripper_mapping_error
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -37,16 +37,65 @@ def main():
 
     with EpisodeReader(args.episode) as episode:
         deployment = episode.spec.collection.deployment
-        samples = [
-            {k: v for k, v in observation.values.items() if k.startswith("robot/")}
-            for observation in episode.observations()
-        ]
-    report = {"episode": str(args.episode), "samples": len(samples), "arms": {}}
+        samples = []
+        camera_samples = {
+            c.name: {"poses": [], "ticks": []} for c in deployment.cameras
+        }
+        for step, observation in enumerate(episode.observations()):
+            samples.append(
+                {k: v for k, v in observation.values.items() if k.startswith("robot/")}
+            )
+            world = episode.world_state(step)
+            for camera in deployment.cameras:
+                prefix = f"cameras/{camera.name}"
+                timestamp = float(observation.values[f"{prefix}/timestamp"])
+                tick = round(timestamp / deployment.control_dt)
+                if (
+                    tick != step // camera.period_steps * camera.period_steps
+                    or abs(timestamp - tick * deployment.control_dt) > 1e-6
+                ):
+                    raise ValueError(
+                        f"Camera timestamp misaligned: {camera.name}, step {step}"
+                    )
+                camera_samples[camera.name]["ticks"].append(tick)
+                camera_samples[camera.name]["poses"].append(
+                    world[f"{prefix}/pose_world"]
+                )
+    report = {
+        "episode": str(args.episode),
+        "samples": len(samples),
+        "arms": {},
+        "cameras": {},
+    }
+
+    def compare_camera(camera, position, orientation):
+        measured = np.stack(camera_samples[camera.name]["poses"])
+        position_error = np.linalg.norm(position - measured[:, :3], axis=1)
+        angle_error = (
+            orientation.inv() * Rotation.from_quat(measured[:, 3:])
+        ).magnitude()
+        report["cameras"][camera.name] = {
+            "parent_frame": camera.parent_frame,
+            "max_position_error_m": float(position_error.max()),
+            "max_orientation_error_rad": float(angle_error.max()),
+            "passed": bool(
+                np.all(position_error < 1e-4) and np.all(angle_error < 1e-3)
+            ),
+        }
+
     for side in ARMS:
         arm = deployment.arms[side]
+        cameras = [
+            c for c in deployment.cameras if c.parent_frame.startswith(f"{side}/")
+        ]
+        tool_frames = list(
+            dict.fromkeys(
+                [arm.tcp_frame] + [c.parent_frame.split("/")[1] for c in cameras]
+            )
+        )
         if arm.asset == PANDA_ASSET:
             config = KinematicsCfg.from_robot_yaml_file(
-                "franka.yml", tool_frames=[arm.tcp_frame]
+                "franka.yml", tool_frames=tool_frames
             )
         else:
             name = model_name(arm.asset)
@@ -54,7 +103,7 @@ def main():
             config = KinematicsCfg.from_basic_urdf(
                 str(prepared_urdf(args.asset_root, name).resolve()),
                 MODELS[name]["base"],
-                [arm.tcp_frame],
+                tool_frames,
             )
         robot = Kinematics(config)
         if tuple(robot.joint_names) != arm.joint_names:
@@ -67,15 +116,34 @@ def main():
         state = robot.compute_kinematics(
             JointState.from_position(q, joint_names=list(arm.joint_names))
         )
-        pose = state.tool_poses.get_link_pose(arm.tcp_frame)
-        position = pose.position.detach().cpu().numpy().reshape(-1, 3)
-        # cuRobo uses wxyz; the LOOM protocol and installed Isaac Lab use xyzw.
-        quaternion = (
-            pose.quaternion.detach().cpu().numpy().reshape(-1, 4)[:, [1, 2, 3, 0]]
-        )
-        base = Rotation.from_quat(arm.base_pose[3:])
-        position = base.apply(position) + np.array(arm.base_pose[:3])
-        orientation = base * Rotation.from_quat(quaternion)
+
+        def world_pose(frame):
+            pose = state.tool_poses.get_link_pose(frame)
+            position = pose.position.detach().cpu().numpy().reshape(-1, 3)
+            # cuRobo uses wxyz; LOOM and installed Isaac Lab use xyzw.
+            quaternion = (
+                pose.quaternion.detach().cpu().numpy().reshape(-1, 4)[:, [1, 2, 3, 0]]
+            )
+            base = Rotation.from_quat(arm.base_pose[3:])
+            return base.apply(position) + arm.base_pose[:3], base * Rotation.from_quat(
+                quaternion
+            )
+
+        position, orientation = world_pose(arm.tcp_frame)
+        for camera in cameras:
+            parent_position, parent_rotation = world_pose(
+                camera.parent_frame.split("/")[1]
+            )
+            ticks = camera_samples[camera.name]["ticks"]
+            parent_position, parent_rotation = (
+                parent_position[ticks],
+                parent_rotation[ticks],
+            )
+            compare_camera(
+                camera,
+                parent_position + parent_rotation.apply(camera.pose[:3]),
+                parent_rotation * Rotation.from_quat(camera.pose[3:]),
+            )
         measured = np.stack([v[f"robot/{side}/tcp_pose_world"] for v in samples])
         position_error = np.linalg.norm(position - measured[:, :3], axis=1)
         angle_error = (
@@ -97,11 +165,19 @@ def main():
                 and linkage_error < linkage_tolerance
             ),
         }
+    for camera in deployment.cameras:
+        if camera.parent_frame == "world":
+            compare_camera(
+                camera, np.asarray(camera.pose[:3]), Rotation.from_quat(camera.pose[3:])
+            )
     report["criteria"] = {"position_m": 1e-4, "orientation_rad": 1e-3}
     report["scope"] = (
-        "Arm FK and gripper linkage only; collision-aware planning and grasp execution are not tested"
+        "Arm FK, gripper linkage and camera extrinsics at their sample timestamps; "
+        "visual quality, collision-aware planning and grasp execution are not tested"
     )
-    report["passed"] = all(v["passed"] for v in report["arms"].values())
+    report["passed"] = all(
+        v["passed"] for group in ("arms", "cameras") for v in report[group].values()
+    )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps(report, indent=2))

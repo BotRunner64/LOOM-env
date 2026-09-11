@@ -113,14 +113,3 @@ def dynamic_names(scene):
     return tuple(
         sorted(name for name, obj in scene.objects.items() if not obj["static"])
     )
-
-
-def maximum_point_speed(asset, world_pose, velocity):
-    """Conservative envelope speed in m/s, including rotation about the body origin."""
-    velocity = np.asarray(vector(velocity, 6, "velocity"))
-    offsets = Rotation.from_quat(np.asarray(world_pose[3:]).copy()).apply(
-        corners(asset)
-    )
-    return float(
-        np.linalg.norm(velocity[:3] + np.cross(velocity[3:], offsets), axis=1).max()
-    )

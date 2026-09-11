@@ -1,8 +1,9 @@
-"""cuRobo 0.8 pose planning in the selected Panda's base frame."""
+"""cuRobo 0.8 pose planning in the selected arm's base frame."""
 
 from itertools import product
 from copy import copy
-from pathlib import Path
+import hashlib
+import json
 import time
 
 import numpy as np
@@ -10,22 +11,22 @@ from scipy.spatial.transform import Rotation
 import torch
 
 from curobo._src.collision.attachment_manager import AttachmentManager
-from curobo.config_io import load_yaml
-from curobo.content import get_robot_configs_path
 from curobo.kinematics import Kinematics, KinematicsCfg
 from curobo.motion_planner import MotionPlanner, MotionPlannerCfg
 from curobo.scene import Cuboid, Mesh, Scene
 from curobo.types import GoalToolPose, JointState, Pose
 
 from loom_env.assets.catalog import asset_definition, collision_mesh
+from loom_env.embodiments.manipulation import manipulation_profile, planner_robot
 from loom_env.runtime.runner import SourceFailure
 
 
-class PandaPlanner:
+class ArmPlanner:
     def __init__(self, deployment, scene, side, target_object, asset_root):
         self.deployment, self.scene, self.side = deployment, scene, side
         self.target_object = target_object
         self.arm = deployment.arms[side]
+        self.profile = manipulation_profile(self.arm)
         self.meshes = {}
         for name, obj in scene.objects.items():
             vertices, faces = collision_mesh(asset_root, obj["asset"])
@@ -37,10 +38,10 @@ class PandaPlanner:
             )
         self.base = np.asarray(self.arm.base_pose)
         self.rotation = Rotation.from_quat(self.base[3:])
-        robot = load_yaml(str(Path(get_robot_configs_path()) / "franka.yml"))
-        robot["robot_cfg"]["kinematics"]["extra_collision_spheres"] = {
-            "attached_object": 8
-        }
+        robot = planner_robot(self.arm, asset_root)
+        self.robot_config_hash = hashlib.sha256(
+            json.dumps(robot, sort_keys=True).encode()
+        ).hexdigest()
         cfg = MotionPlannerCfg.create(
             robot=robot,
             collision_cache={"obb": 128, "mesh": 16},
@@ -55,6 +56,7 @@ class PandaPlanner:
         # Time scaling slows the complete collision-checked path uniformly.
         cfg.trajopt_solver_config.interpolation_dt = deployment.control_dt / 2
         self.planner = MotionPlanner(cfg)
+        self.planner.disable_link_collision(list(self.profile.mounting_contact_bodies))
         # The pinned 0.8 high-level property refers to a missing solver field.
         # Instantiate its native manager against the shared kinematics params.
         self.attachment = AttachmentManager(self.planner.kinematics)
@@ -63,15 +65,24 @@ class PandaPlanner:
             is not self.planner.kinematics.config.kinematics_config
         ):
             raise RuntimeError("cuRobo solvers must share attachment geometry")
+        other = "left" if side == "right" else "right"
+        self.holding_arm = deployment.arms[other]
         self.holding_model = Kinematics(
-            KinematicsCfg.from_robot_yaml_file("franka.yml", tool_frames=["panda_hand"])
+            KinematicsCfg.from_robot_yaml_file(
+                planner_robot(self.holding_arm, asset_root)
+            )
         )
+        if tuple(self.planner.kinematics.joint_names) != self.arm.joint_names or (
+            tuple(self.holding_model.joint_names) != self.holding_arm.joint_names
+        ):
+            raise ValueError("Planner and deployment joint orders disagree")
         self.attached = False
 
-    def _state(self, q):
+    def _state(self, q, arm=None):
+        arm = self.arm if arm is None else arm
         return JointState.from_position(
             torch.tensor(np.asarray(q)[None], device="cuda:0", dtype=torch.float32),
-            joint_names=list(self.arm.joint_names),
+            joint_names=list(arm.joint_names),
         )
 
     def _local_pose(self, world):
@@ -90,7 +101,7 @@ class PandaPlanner:
         other = "left" if self.side == "right" else "right"
         arm = self.deployment.arms[other]
         held = self.holding_model.compute_kinematics(
-            self._state(observation.values[f"robot/{other}/joint_position"])
+            self._state(observation.values[f"robot/{other}/joint_position"], arm)
         )
         spheres = held.robot_spheres.detach().cpu().numpy().reshape(-1, 4)
         rotation = Rotation.from_quat(arm.base_pose[3:])
@@ -174,6 +185,9 @@ class PandaPlanner:
             raise SourceFailure("Invalid cuRobo trajectory", kind="planning")
         return trajectory[1:].copy(), {
             "success": True,
+            "robot_asset": self.arm.asset,
+            "robot_config_sha256": self.robot_config_hash,
+            "fixed_mount_contact_links": list(self.profile.mounting_contact_bodies),
             "goal_pose_world": np.asarray(goal_world).tolist(),
             "waypoints": len(trajectory) - 1,
             "planning_seconds": elapsed,

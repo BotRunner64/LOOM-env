@@ -45,17 +45,18 @@ cameras:
     period_steps: 1
     parent_frame: world
     pose: [2.0, 0.0, 1.9, 0.3681179873103491, 0.3681179873103491, 0.6037293660396003, 0.6037293660396003]
+  # Asset camera frame: +X forward, +Y left, +Z up; pose converts OpenGL axes.
   - name: left_wrist
     width: 640
     height: 480
     period_steps: 1
-    parent_frame: left/wrist_3_link
-    pose: [0, 0.14, 0.1, 0.40455358483375686, 0.0, 0.0, 0.9145142956773046]
+    parent_frame: left/camera
+    pose: [0, 0, 0, 0.5, -0.5, -0.5, 0.5]
     focal_length: 16.0
   - name: right_wrist
     width: 640
     height: 480
     period_steps: 1
-    parent_frame: right/wrist_3_link
-    pose: [0, 0.14, 0.1, 0.40455358483375686, 0.0, 0.0, 0.9145142956773046]
+    parent_frame: right/camera
+    pose: [0, 0, 0, 0.5, -0.5, -0.5, 0.5]
     focal_length: 16.0

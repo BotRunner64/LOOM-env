@@ -7,6 +7,8 @@ from isaaclab.sensors import CameraCfg
 from isaaclab.utils.math import combine_frame_transforms
 from isaaclab_physx.renderers import IsaacRtxRendererCfg
 
+from loom_env.embodiments.frames import resolve_camera_mount
+
 
 def camera_config(spec):
     """Create a world-space optical prim; CameraMounts drives wrist extrinsics."""
@@ -37,21 +39,26 @@ class CameraMounts:
     and nested imported USD hierarchies. The link-to-camera transform stays fixed.
     """
 
-    def __init__(self, specs, cameras, robots):
+    def __init__(self, deployment, cameras, robots, asset_root):
         self.cameras = cameras
         self.mounts = []
-        for spec in specs:
+        self.resolved = {}
+        for spec in deployment.cameras:
             if spec.parent_frame == "world":
                 continue
-            side, body = spec.parent_frame.split("/")
+            side, _ = spec.parent_frame.split("/")
             robot = robots[side]
-            if body not in robot.body_names:
-                raise ValueError(
-                    f"Camera parent rigid body not found: {spec.parent_frame}"
-                )
+            body, pose = resolve_camera_mount(
+                spec, deployment.arms[side], robot.body_names, asset_root
+            )
             body_id = robot.body_names.index(body)
-            local = torch.tensor([spec.pose], dtype=torch.float32, device=robot.device)
+            local = torch.tensor(pose[None], dtype=torch.float32, device=robot.device)
             self.mounts.append((cameras[spec.name], robot, body_id, local))
+            self.resolved[spec.name] = {
+                "parent_frame": spec.parent_frame,
+                "body_frame": f"{side}/{body}",
+                "optical_pose_in_body": pose.tolist(),
+            }
 
     def update(self, sim, *, warmup=False):
         for camera, robot, body_id, local in self.mounts:

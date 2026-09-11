@@ -1,0 +1,60 @@
+# Compact right-arm work area for cross-embodiment task validation.
+id: tabletop_compact
+objects:
+  table:
+    asset: maniskill:table
+    category: workspace
+    description: 木质餐桌
+    static: true
+    pose:
+    - 0
+    - 0
+    - 0
+    - 0
+    - 0
+    - 0
+    - 1
+  object:
+    asset: robodojo:brick
+    category: graspable_object
+    description: 红色积木
+    static: false
+    pose:
+    - -0.16
+    - -0.215
+    - 0.0172
+    - 0
+    - 0
+    - 0
+    - 1
+    position_min:
+    - -0.18
+    - -0.23
+    position_max:
+    - -0.14
+    - -0.2
+  basket:
+    asset: robodojo:basket
+    category: receptacle
+    description: 灰色收纳篮
+    static: false
+    pose:
+    - 0.04
+    - -0.215
+    - 0.03857
+    - 0
+    - 0
+    - 0
+    - 1
+parameters:
+  workspace_pose:
+  - 0.45
+  - 0
+  - 0.75
+  - 0
+  - 0
+  - 0
+  - 1
+  workspace_size:
+  - 0.96
+  - 1.9

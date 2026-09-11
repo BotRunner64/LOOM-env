@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 import traceback
 
-from loom_env.specs.config import load_collection, plain
+from loom_env.specs.config import load_collection, load_deployment, load_scene, plain
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -18,7 +18,9 @@ def main():
     parser.add_argument(
         "--collection", type=Path, default=ROOT / "configs/collection/pick_place.yaml"
     )
-    parser.add_argument("--output-dir", type=Path, default=ROOT / "outputs/manipulation")
+    parser.add_argument(
+        "--output-dir", type=Path, default=ROOT / "outputs/manipulation"
+    )
     parser.add_argument("--asset-root", type=Path, default=ROOT / ".cache/assets")
     parser.add_argument(
         "--episode-id",
@@ -27,11 +29,17 @@ def main():
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--episodes", type=int, default=1)
     parser.add_argument("--arm", choices=("left", "right"))
+    parser.add_argument("--deployment", type=Path)
+    parser.add_argument("--scene", type=Path)
     parser.add_argument("--max-steps", type=int)
     args = parser.parse_args()
     if args.episodes < 1:
         parser.error("--episodes must be positive")
     collection = load_collection(args.collection)
+    if args.deployment:
+        collection = replace(collection, deployment=load_deployment(args.deployment))
+    if args.scene:
+        collection = replace(collection, scene=load_scene(args.scene))
     if args.arm:
         collection = replace(collection, arm_roles={"manipulator": args.arm})
     if args.max_steps is not None:

@@ -4,12 +4,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from loom_env.runtime.motion import (
-    MotionCheck,
-    MotionSource,
-    gripper_command,
-    gripper_mapping_error,
-)
+from loom_env.embodiments.commands import gripper_command, gripper_mapping_error
+from loom_env.runtime.motion import MotionCheck, MotionSource
 from loom_env.specs.config import load_deployment
 from loom_env.specs.episode import Observation
 

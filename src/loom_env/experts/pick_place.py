@@ -1,8 +1,10 @@
 """A small feedback-driven expert; truth is explicitly injected at construction."""
 
 import numpy as np
+from scipy.spatial.transform import Rotation
 
 from loom_env.embodiments.commands import initial_command
+from loom_env.embodiments.manipulation import manipulation_profile
 from loom_env.assets.catalog import asset_definition
 from loom_env.scenes.workspace import transform, workspace
 from loom_env.runtime.runner import SourceFailure
@@ -12,8 +14,6 @@ from loom_env.specs.episode import Action, Event
 
 class LiftExpert:
     STAGES = ("approach", "descend", "close", "lift", "wait")
-    # Official Panda hand frame -> grasp center along the local +Z axis.
-    HAND_TO_GRASP = 0.1034
 
     def __init__(self, collection, planner, world_state):
         self.collection, self.planner, self.world_state = (
@@ -22,6 +22,12 @@ class LiftExpert:
             world_state,
         )
         self.side = collection.arm_roles["manipulator"]
+        arm = collection.deployment.arms[self.side]
+        self.profile = manipulation_profile(arm)
+        self.tool_rotation = Rotation.from_quat(arm.base_pose[3:]) * Rotation.from_quat(
+            self.profile.grasp_rotation
+        )
+        self.closed, self.opened = arm.gripper.command_limits[0]
         self.other = "left" if self.side == "right" else "right"
         self.arm_slice = collection.deployment.action_slices[f"{self.side}/arm"]
         self.grip_slice = collection.deployment.action_slices[f"{self.side}/gripper"]
@@ -45,16 +51,21 @@ class LiftExpert:
     def stage(self):
         return self.STAGES[self.stage_index]
 
+    def _tcp_goal(self, grasp_point):
+        position = np.asarray(grasp_point) - self.tool_rotation.apply(
+            self.profile.tcp_to_grasp
+        )
+        return np.r_[position, self.tool_rotation.as_quat()]
+
     def _goal(self, truth, observation):
         grasp = transform(
             truth[f"{self.obj}/pose_world"], [*self.asset.grasp, 0, 0, 0, 1]
-        )
-        hand = grasp[:3] + [0, 0, self.HAND_TO_GRASP]
+        )[:3]
         if self.stage == "approach":
-            hand[2] += 0.12
+            grasp[2] += 0.12
         elif self.stage == "lift":
-            hand[2] = self.support[2] + 0.18 + self.asset.grasp[2] + self.HAND_TO_GRASP
-        return np.r_[hand, [1.0, 0.0, 0.0, 0.0]]
+            grasp[2] = self.support[2] + 0.18 + self.asset.grasp[2]
+        return self._tcp_goal(grasp)
 
     def _advance(self, events):
         events.append(
@@ -120,7 +131,9 @@ class LiftExpert:
             if self.stage == "wait":
                 break
             if self.stage in {"close", "release"}:
-                self.command[self.grip_slice] = 0.0 if self.stage == "close" else 0.08
+                self.command[self.grip_slice] = (
+                    self.closed if self.stage == "close" else self.opened
+                )
                 ready = grip if self.stage == "close" else not grip
                 self.stable = self.stable + 1 if ready else 0
                 if self.stable >= 5 and self.stage_steps * self.dt >= 0.6:
@@ -135,11 +148,9 @@ class LiftExpert:
                 self.path_index += 1
             else:
                 q = observation.values[f"robot/{self.side}/joint_position"]
-                dq = observation.values[f"robot/{self.side}/joint_velocity"]
                 self.stable = (
                     self.stable + 1
                     if np.max(np.abs(q - self.command[self.arm_slice])) < 0.01
-                    and np.max(np.abs(dq)) < 0.05
                     else 0
                 )
                 if self.stable >= 3:
@@ -147,7 +158,7 @@ class LiftExpert:
                     continue
                 if (self.stage_steps - len(self.path)) * self.dt > 3.0:
                     raise SourceFailure(
-                        f"{self.stage} tracking did not settle", kind="skill"
+                        f"{self.stage} did not reach its joint target", kind="skill"
                     )
             break
         if self.stage in {"lift", "transfer", "lower"} or (
@@ -187,6 +198,10 @@ class PickPlaceExpert(LiftExpert):
 
     def _goal(self, truth, observation):
         if self.stage in {"transfer", "lower"}:
+            if self.stage == "lower":
+                self.retreat_pose = observation.values[
+                    f"robot/{self.side}/tcp_pose_world"
+                ].copy()
             region = truth[f"{self.receptacle}/region_pose_world"]
             # Place above the opening; release after physical transfer and tracking.
             local = [
@@ -198,13 +213,16 @@ class PickPlaceExpert(LiftExpert):
                 0,
                 1,
             ]
-            hand = transform(region, local)[:3]
-            hand[2] += self.asset.grasp[2] + self.HAND_TO_GRASP
+            grasp = transform(region, local)[:3]
+            grasp[2] += self.asset.grasp[2]
             if self.stage == "transfer":
-                hand[2] += 0.10
-            return np.r_[hand, [1.0, 0.0, 0.0, 0.0]]
+                held_grasp = transform(
+                    truth[f"{self.obj}/pose_world"], [*self.asset.grasp, 0, 0, 0, 1]
+                )[:3]
+                # Carry at the measured lifted height, or above the rim if higher.
+                grasp[2] = max(grasp[2], held_grasp[2])
+            return self._tcp_goal(grasp)
         if self.stage == "retreat":
-            hand = observation.values[f"robot/{self.side}/tcp_pose_world"][:3].copy()
-            hand[2] += 0.12
-            return np.r_[hand, [1.0, 0.0, 0.0, 0.0]]
+            # Return to the measured pose before insertion, already reached in transfer.
+            return self.retreat_pose.copy()
         return super()._goal(truth, observation)

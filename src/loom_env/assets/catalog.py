@@ -18,7 +18,7 @@ class AssetDefinition:
     category: str
     bounds: tuple[tuple[float, float, float], tuple[float, float, float]]
     dynamic: bool = False
-    # Object-local Panda grasp centre; TCP offset belongs to the embodiment.
+    # Object-local grasp centre; TCP offset belongs to the embodiment.
     grasp: tuple[float, float, float] | None = None
     # Conservative, manually checked free interior: centre and full extents.
     interior: tuple[tuple[float, float, float], tuple[float, float, float]] | None = (

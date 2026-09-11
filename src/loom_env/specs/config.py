@@ -168,7 +168,7 @@ class ArmSpec:
 
 @dataclass(frozen=True)
 class CameraSpec:
-    """Pose of an OpenGL optical frame (-Z forward, +Y up) in parent_frame."""
+    """OpenGL optical pose in a world, body, or fixed URDF parent frame."""
 
     name: str
     width: int
@@ -193,7 +193,7 @@ class CameraSpec:
             parts = self.parent_frame.split("/")
             if len(parts) != 2 or parts[0] not in ARMS:
                 raise ValueError(
-                    "Camera parent_frame must be world or left/right/<body>"
+                    "Camera parent_frame must be world or left/right/<frame>"
                 )
             identifier(parts[1])
         object.__setattr__(self, "pose", pose(self.pose))
@@ -516,6 +516,15 @@ def load_deployment(path: str | Path) -> DeploymentSpec:
         return deployment_from_dict(_read_mapping(path))
     except (KeyError, TypeError, ValueError) as error:
         raise ValueError(f"Invalid deployment config {path}: {error}") from error
+
+
+def load_scene(path: str | Path) -> SceneSpec:
+    """Load one scene preset without requiring simulator assets."""
+    path = Path(path)
+    try:
+        return SceneSpec(**_read_mapping(path))
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError(f"Invalid scene config {path}: {error}") from error
 
 
 def load_collection(path: str | Path) -> CollectionSpec:

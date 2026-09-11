@@ -12,7 +12,7 @@
 | `dual_xarm6_robotiq.yaml` | 6 | 6 个旋转关节 | 张开角坐标 0–0.81 rad | 14 | `link6` |
 | `dual_openarm.yaml` | 7 | 2 个移动关节 | 左 0.016–0.088 m，右 0–0.088 m | 16 | `openarm_left_link7`／`openarm_right_link7` |
 
-当前支持固定安装双臂的关节控制、状态读取、稳定重置、物理运动记录、机械臂 FK 和夹爪耦合一致性检查。末端测量使用表中的刚体坐标系，不等同于指尖抓取中心；双 Panda 已接入真实抓取放置和碰撞感知规划，其他本体仍处于运动诊断范围；实机标定尚未实现。
+当前支持固定安装双臂的关节控制、状态读取、稳定重置、物理运动记录、机械臂 FK 和夹爪耦合一致性检查。末端测量使用表中的刚体坐标系，不等同于指尖抓取中心；Panda 和 Piper 已接入共用抓取放置专家和碰撞感知规划，实际任务验收范围见[实现记录](implementation.md)；其他本体仍处于运动诊断范围，实机标定尚未实现。
 
 ## 资产来源与存放
 
@@ -93,19 +93,83 @@ python scripts/check_kinematics.py \
 七类部署统一配置 `front`、`left_wrist`、`right_wrist`，均为 640×480 RGB、每个控制步采样一次（默认 20 Hz）。抓取采集与运动预览读取同一部署配置，不再由预览脚本单独覆盖相机。
 
 - Panda 的 `front` 固定在机器人侧 `(-0.25, 0.0, 1.55)` m，朝向共同操作区 `(0.45, 0.0, 0.80)` m；其余六类运动诊断仍使用外部观察位置 `(2.0, 0.0, 1.9)` m。
-- 腕相机相对各臂末端刚性连杆固定，随连杆移动；不跟随活动夹指开合。Panda 使用 `panda_hand`，Piper／X5／xArm6 使用 `link6`，UR5 使用 `wrist_3_link`，OpenArm 使用各侧 `link7`，YAM 使用 `gripper`。
-- 各本体的安装位姿分别维护在对应 deployment 中。X5 夹爪沿局部 +X、YAM 沿 -Z，其余也按各自夹爪几何设置，不能直接复制同一偏移。
+- 腕相机通过固定安装变换跟随机械臂，不跟随活动夹指开合。资产已有相机安装系时直接引用；没有安装系时，由 deployment 显式定义仿真安装位姿。
 
-`parent_frame` 取 `world` 或 `left/<刚体名称>`／`right/<刚体名称>`；`pose` 是相对该坐标系的 xyz（m）加 xyzw 四元数，光学约定为 OpenGL（-Z 朝前、+Y 朝上）。初始化时按刚体名称绑定原生 articulation 中的实际连杆，缺失时报错。渲染前用实测连杆世界位姿与固定安装位姿合成相机位姿，并同步全部腕相机；USD 光学 prim 放在世界系，避免当前 Fabric 对嵌套子相机的陈旧变换。图像及位姿在同一采样时刻缓存。每次初帧取图前预热渲染，不推进物理或控制时间。任务环境在创建时先完成一次 GPU articulation 步进初始化，之后再完整恢复 Episode 初态，避免冷启动重放的机器人外观仍停留在加载姿态。当前采集与诊断均为单环境。
+| 本体 | deployment 引用的父坐标系（每侧） | 安装来源 |
+| --- | --- | --- |
+| Piper | `camera` | URDF 的 `link6 → camera_mount → camera` |
+| X5 | `camera` | URDF 的 `link6 → camera_base → camera` |
+| UR5＋WSG | `camera` | URDF 的 `wrist_3_link → camera_base → camera` |
+| xArm6＋Robotiq | `camera_link` | URDF 的 `link6 → camera_link`，加下述官方光学偏移 |
+| Panda | `panda_hand` | deployment 显式安装变换 |
+| YAM | `gripper` | deployment 显式安装变换 |
+| OpenArm | 各侧 `openarm_*_link7` | deployment 显式安装变换 |
+
+`parent_frame` 取 `world` 或 `left/<frame>`／`right/<frame>`；`pose` 是相对该坐标系的**光学位姿**：xyz（m）加 xyzw 四元数，光学约定为 OpenGL（-Z 朝前、+Y 朝上）。父 frame 的轴由资产定义，不能从名称推断为光学轴。RoboTwin 三类资产的 `camera` 按 SAPIEN 的 +X 前、+Y 左、+Z 上使用，deployment 的零平移和 `[0.5, -0.5, -0.5, 0.5]` 四元数只表达 OpenGL 光学轴转换，支架位置和倾角全部取自 URDF。[RoboTwin 位姿同步实现](https://github.com/RoboTwin-Platform/RoboTwin/blob/9633927e61a47df88db3806b5aade5c9488c79fd/envs/_base_task.py#L385-L399)。
+
+xArm 的 `camera_link` 本身并非光学中心。[ManiSkill 固定版本配置](https://github.com/haosulab/ManiSkill/blob/b860fb7fc8ce086fb5f27f554f9c7146650f1cee/mani_skill/agents/robots/xarm6/xarm6_robotiq.py#L407-L423) 在该 frame 上使用 SAPIEN 位姿 `p=[0, 0, -0.05]` m、`q(wxyz)=[√0.5, 0, √0.5, 0]`。转换到本项目的 OpenGL／xyzw 后为 `pose=[0, 0, -0.05, 0, 0, -√0.5, √0.5]`。本轮对齐安装外参，分辨率、焦距和裁剪范围仍采用下述 LOOM 配置，因此不声称完整复现上游成像内参。
+
+[`embodiments/frames.py`](../src/loom_env/embodiments/frames.py) 在初始化时解析已验证的准备后 URDF：从目标 frame 沿固定关节回溯到实际 articulation 中最近的刚体，依次合成安装变换，再应用 deployment 的光学位姿。导入时可继续合并固定关节，无需为安装 frame 新增物理刚体。直接引用现存刚体时不读取 URDF，Panda 的原生 USD 走此路径；当前不解析原生 USD 中任意被合并的固定 frame。缺失 frame、循环链、缺失刚体而必须跨过活动关节时均报错，不默认为零位或改挂基座。挂载计算不使用连杆质心或外观 mesh 的局部原点。
+
+[`embodiments/cameras.py`](../src/loom_env/embodiments/cameras.py) 渲染前用实测连杆世界位姿与解析出的光学安装位姿合成相机位姿，并同步全部腕相机；USD 光学 prim 放在世界系，避免当前 Fabric 对嵌套子相机的陈旧变换。采集与运动预览共用此路径。Episode 的 `sampled_parameters.camera_mounts` 记录原始父 frame、实际刚体和相对刚体的光学位姿，作为派生诊断信息；运行配置的安装来源仍为 URDF 与 deployment。图像及位姿在同一采样时刻缓存。每次初帧取图前预热渲染，不推进物理或控制时间。任务环境在创建时先完成一次 GPU articulation 步进初始化，之后再完整恢复 Episode 初态，避免冷启动重放的机器人外观仍停留在加载姿态。当前采集与诊断均为单环境。
 
 `focal_length` 与 `horizontal_aperture` 使用 mm，`clipping_range` 使用 m。全局相机焦距 22 mm、水平孔径 24 mm（水平视场约 57°），腕相机焦距 16 mm（约 74°），近裁剪距离 1 cm。实际内参写入 Episode 元数据；采样时相机世界位姿保存在真值 `cameras/<name>/pose_world`，与该相机 RGB 时间戳对应，不作为模型观测。
 
-目前模拟光学传感器，不增加相机外壳、支架质量或碰撞体。安装位姿用于仿真视角，不表示已经完成实机安装标定。导出指定视角：
+目前模拟光学传感器；资产自带的相机／支架外观随资产保留，不额外增加外壳、支架质量或碰撞体。Panda、YAM、OpenArm 的显式安装是仿真方案；引用上游安装系也不表示已经完成实机安装标定。导出指定视角：
 
 ```bash
 python scripts/export_video.py outputs/pick_place/episodes/panda-place \
   outputs/pick_place/panda-left-wrist.mp4 --camera left_wrist
 ```
+
+### 相机挂载验证与复现
+
+已有通过校验的资产缓存时，本轮只修改取图挂载，不需要重新转换 USD。未准备资产时，先按本文资产准备及[场景资产准备](implementation.md#资产准备)完成机器人、桌面和物体的准备。按[环境文档](environment.md)激活 `loom-env` 并设置其中的 EULA／Vulkan 环境变量，在仓库根目录执行：
+
+```bash
+# 为每次验证选一个新的目录，已有 Episode 不覆盖。
+run_dir=outputs/camera-mounts-repeat
+for robot in piper x5 ur5_wsg xarm6_robotiq panda yam openarm; do
+  python scripts/preview_motion.py \
+    --deployment "configs/deployments/dual_${robot}.yaml" \
+    --output-dir "$run_dir/$robot" --episode-id "$robot-mount"
+  python scripts/check_kinematics.py \
+    "$run_dir/$robot/episodes/$robot-mount" \
+    --output "$run_dir/$robot/kinematics.json"
+  python scripts/export_video.py \
+    "$run_dir/$robot/episodes/$robot-mount" "$run_dir/$robot/motion.mp4" \
+    --camera front left_wrist right_wrist
+done
+```
+
+预期每类产生 12 秒、241 帧的三路录制，运动诊断和 `kinematics.json` 中的 `passed` 均为 `true`。查看三视角视频，检查相机随腕运动、夹指开合不带动相机、图像朝向与各安装定义一致，以及是否存在遮挡。FK 数值通过只验证坐标一致性，不能替代这些画面检查。`Mount frame not found` 时检查 deployment 的 frame 拼写与对应准备后 URDF；`untracked moving joint` 表示实际刚体集合缺失了活动关节的子连杆，应调查导入结果，不应把该关节当成固定关节。
+
+Piper 完整抓放视野检查使用紧凑布局和右臂：
+
+```bash
+python scripts/collect.py \
+  --deployment configs/deployments/dual_piper.yaml \
+  --scene configs/scenes/tabletop_compact.yaml --arm right \
+  --output-dir outputs/camera-mounts-grasp-repeat \
+  --episode-id piper-place-mount --seed 0
+python scripts/export_video.py \
+  outputs/camera-mounts-grasp-repeat/episodes/piper-place-mount \
+  outputs/camera-mounts-grasp-repeat/views.mp4 --camera front left_wrist right_wrist
+```
+
+### 本轮挂载验证结果（2026-09-11）
+
+七类本体均完成 240 步／241 帧的三路运动录制、运动后重置、独立 FK／相机位姿检查；Episode 中的部署配置与当前 YAML 一致。21 路相机的最大位置差为 `8.36e-7` m（约 0.00084 mm），最大旋转差为 `2.18e-6` rad，低于 0.1 mm／0.001 rad 阈值。固定链组合、最近保留刚体、非法 frame／活动关节／循环链的单元检查与完整测试集通过（135 项），Ruff 检查通过。
+
+Piper 紧凑布局右臂 seed 0 完成抓放：211 步、10.55 s，结果为 `object_inside_and_released`。与之前正常朝向版本逐帧比较，两臂关节位置、右夹指位置及目标物体位置的最大差均为零；对照视频的视角差异因此来自相机外参。新腕相机在接近、夹取、抬升与释放阶段均可看到目标，近处夹指会占据部分画面。
+
+- [Piper 前后对照视频](../outputs/camera-mounts/grasp/before-after.mp4)：左为固定观察相机，中为原右腕外参，右为资产安装链外参；[分阶段对照图](../outputs/camera-mounts/grasp/before-after.jpg)。
+- [七类三视角初帧总览](../outputs/camera-mounts/overview.jpg)；每类的完整三路视频和分阶段图片位于 `outputs/camera-mounts/<robot>/motion.mp4`、`views.jpg`。
+- [汇总测量报告](../outputs/camera-mounts/validation.json)、[Piper 完整三路抓放视频](../outputs/camera-mounts/grasp/views.mp4)、[前后物理轨迹比较](../outputs/camera-mounts/grasp/before-after.json)。
+
+**当前视野限制：** X5、YAM、OpenArm 的运动诊断初始姿态并不面向桌面操作区，初帧光轴分别高于水平约 2.92°、37.18°、37.53°，腕相机看不到桌面目标。X5 当前挂载来自资产；YAM／OpenArm 显式挂载未改。它们的坐标与运动跟随检查通过，但桌面任务视野尚未验收，需结合任务另行调整手臂姿态或选择有依据的安装方案。xArm 按官方光学旋转呈现画面，夹指出现在画面侧缘；本轮没有新增它的完整抓放验收。
+
+Piper 抓放的[完整运动学报告](../outputs/camera-mounts/grasp/kinematics.json)中，三路相机检查全部通过、机械臂 FK 误差也低于阈值，但总 `passed` 为 `false`：原有右夹指耦合检查在带物抓持时测得约 4.33 mm 偏差，超过空载运动检查使用的 0.5 mm 阈值。旧录制具有完全相同的偏差和夹指轨迹，本轮未修改该判据或夹爪行为；因此不能把这份完整报告描述为全部通过。七类空载运动报告均通过。
 
 ### 首轮相机验证（2026-09-10，历史部署）
 
@@ -113,7 +177,7 @@ python scripts/export_video.py outputs/pick_place/episodes/panda-place \
 
 另用 Panda 的三路相机分别每 1／2／3 个控制步采样，验证缓存图像、时间戳及位姿对齐，并在两臂运动后恢复初态；相机位姿恢复最大分量误差为 1.2e-7。预热后的 RGB 允许渲染噪声，不要求逐像素相等。Panda 完整动作重放再次通过物理任务与逐帧状态比较。
 
-验证产物保存在 Git 忽略的 `outputs/cameras/`：各本体的 `*-cameras.json` 为安装变换检查，`*-views.jpg` 为分阶段视角；最终本体预设对应 Panda／Piper／X5／xArm6 的 `004`、OpenArm／UR5 的 `005`、YAM 的 `006`。`reset/reset-report.json` 保存多频率与重置结果。早期诊断产物保留，不作为最终相机验收结果。汇总报告为 `outputs/cameras/validation.json`，同时校验所选轨迹的部署与当前 YAML 一致。
+验证产物保存在 Git 忽略的 `outputs/cameras/`：各本体的 `*-cameras.json` 为安装变换检查，`*-views.jpg` 为分阶段视角；最终本体预设对应 Panda／Piper／X5／xArm6 的 `004`、OpenArm／UR5 的 `005`、YAM 的 `006`。`reset/reset-report.json` 保存多频率与重置结果。早期诊断产物保留，不作为最终相机验收结果。汇总报告为 `outputs/cameras/validation.json`，当时同时校验了所选轨迹的部署与 YAML 一致；上述 Piper／X5／UR5／xArm 挂载迁移后，这些历史轨迹不再代表当前外参。
 
 - [七类本体三视角总览](../outputs/cameras/embodiment-camera-views.jpg)
 - [Panda 三视角抓取视频](../outputs/cameras/panda-three-view-pick-place-final.mp4)
@@ -121,11 +185,11 @@ python scripts/export_video.py outputs/pick_place/episodes/panda-place \
 
 ## 验收范围
 
-重置明确写入关节位置、零速度和控制目标。预览要求机械臂误差低于 0.003 rad、速度低于 0.01 rad/s；移动夹爪误差低于 0.0005 m，旋转夹爪低于 0.003 rad，速度低于各自单位下的 0.01/s，连续稳定 0.25 秒，最长等待 5 秒。还会先运动再重置复验，稳定化过程不进入 episode 时间。
+重置明确写入关节位置、零速度和控制目标。预览要求机械臂位置误差低于 0.003 rad；移动夹爪位置误差低于 0.0005 m，旋转夹爪低于 0.003 rad，连续到位 0.25 秒，最长等待 5 秒。关节及夹爪速度保留为诊断数据，不作为重置验收条件。还会先运动再重置复验，稳定化过程不进入 episode 时间。
 
 12 秒运动诊断要求每个机械臂关节均移动超过 0.08 rad，保持臂和最终位置误差均低于 0.04 rad，夹爪实际命令行程超过配置范围的 80%。20 Hz 下保存 240 个动作与 241 帧观测。任何诊断失败都会保存结果并返回非零退出码。
 
-`check_kinematics.py` 用每帧实测关节位置计算 cuRobo FK，处理四元数约定和安装变换后，与仿真测量的末端位姿比较，阈值为 0.1 mm／0.001 rad。同时核对夹爪各物理关节是否满足声明的耦合关系，允许 0.0005 m 或 0.003 rad 的误差。这里的微小 FK 差异表示两个引擎对同一模型的数值一致性，不是实机定位精度。
+`check_kinematics.py` 用每帧实测关节位置计算 cuRobo FK，处理四元数约定和安装变换后，与仿真测量的末端位姿比较，阈值为 0.1 mm／0.001 rad。相机检查独立通过 cuRobo 计算 deployment 所引用 frame 的 FK，再合成光学偏移，与渲染器记录的相机世界位姿比较；不调用运行时的固定链解析器。按每路相机的采样时间选择对应关节状态，并检查采样周期和时间戳一致，世界固定相机也检查外参。同时核对夹爪各物理关节是否满足声明的耦合关系，允许 0.0005 m 或 0.003 rad 的误差。这里的微小 FK 差异表示两个引擎对同一模型的数值一致性，不是实机定位精度。
 
 ## 本轮验证结果（2026-09-09）
 

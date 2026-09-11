@@ -10,6 +10,7 @@ from pathlib import Path
 import numpy as np
 from scipy.spatial.transform import Rotation
 import torch
+from pxr import Usd, UsdPhysics
 
 import isaaclab.sim as sim_utils
 from isaaclab.assets import AssetBaseCfg
@@ -28,7 +29,7 @@ from isaaclab.utils import configclass
 from isaaclab_physx.sensors import ContactSensorCfg
 
 from loom_env.embodiments.cameras import CameraMounts, camera_config
-from loom_env.embodiments.assets import PANDA_ASSET
+from loom_env.embodiments.manipulation import manipulation_profile
 from loom_env.embodiments.isaac_lab import DualArmArticulation, articulation_config
 from loom_env.assets.catalog import (
     asset_definition,
@@ -36,7 +37,7 @@ from loom_env.assets.catalog import (
     prepared_directory,
     sha256,
 )
-from loom_env.embodiments.commands import initial_command
+from loom_env.embodiments.commands import gripper_command, initial_command
 from loom_env.embodiments.contacts import opposing_contacts
 from loom_env.scenes.isaac_lab import instance_config, simulation_config
 from loom_env.scenes.workspace import (
@@ -45,7 +46,6 @@ from loom_env.scenes.workspace import (
     transform,
     workspace,
     corners,
-    maximum_point_speed,
 )
 from loom_env.specs.config import ARMS, EpisodeSpec, plain
 from loom_env.specs.episode import Frame, Observation, Transition, observation_shapes
@@ -154,22 +154,39 @@ def policy_signal(env, key):
 
 
 def environment_config(collection, asset_root):
-    if any(arm.asset != PANDA_ASSET for arm in collection.deployment.arms.values()):
-        raise ValueError("Contact measurement currently supports dual Panda")
     candidates = sample_objects(collection.scene, 0)
     scene = InteractiveSceneCfg(num_envs=1, env_spacing=3.0, replicate_physics=False)
     prefix = "{ENV_REGEX_NS}"
+    contact_paths = {}
     for side in ARMS:
-        cfg, _ = articulation_config(collection.deployment.arms[side], asset_root)
+        arm = collection.deployment.arms[side]
+        profile = manipulation_profile(arm)
+        cfg, _ = articulation_config(arm, asset_root)
+        if arm.asset not in contact_paths:
+            stage = Usd.Stage.Open(cfg.spawn.usd_path)
+            root = stage.GetDefaultPrim()
+            paths = {}
+            for prim in Usd.PrimRange(root):
+                if prim.GetName() in profile.finger_bodies and prim.HasAPI(
+                    UsdPhysics.RigidBodyAPI
+                ):
+                    if prim.GetName() in paths:
+                        raise ValueError("Ambiguous contact body name in robot asset")
+                    paths[prim.GetName()] = str(
+                        prim.GetPath().MakeRelativePath(root.GetPath())
+                    )
+            if set(paths) != set(profile.finger_bodies):
+                raise ValueError("Manipulation contact bodies missing from robot asset")
+            contact_paths[arm.asset] = [paths[name] for name in profile.finger_bodies]
         cfg.prim_path = f"{prefix}/{side}_robot"
         cfg.spawn.activate_contact_sensors = True
         setattr(scene, side, cfg)
-        for finger in ("left", "right"):
+        for finger, path in zip(("left", "right"), contact_paths[arm.asset]):
             setattr(
                 scene,
                 f"contact_{side}_{finger}",
                 ContactSensorCfg(
-                    prim_path=f"{prefix}/{side}_robot/panda_{finger}finger",
+                    prim_path=f"{prefix}/{side}_robot/{path}",
                     filter_prim_paths_expr=[
                         f"{prefix}/object_{name}"
                         for name in dynamic_names(collection.scene)
@@ -262,12 +279,13 @@ class ManipulationEnvironment(ManagerBasedEnv):
         )
         self.robot.initialize()
         self.camera_mounts = CameraMounts(
-            self.collection.deployment.cameras,
+            self.collection.deployment,
             {
                 c.name: self.scene[f"camera_{c.name}"]
                 for c in self.collection.deployment.cameras
             },
             self.robot.robots,
+            self.asset_root,
         )
         super().load_managers()
 
@@ -295,7 +313,14 @@ class ManipulationEnvironment(ManagerBasedEnv):
                     .numpy()
                 )
                 contacts.append(forces)
-                grasped.append(opposing_contacts(forces, fingers))
+                gripper = self.collection.deployment.arms[side].gripper
+                grasped.append(
+                    opposing_contacts(
+                        forces,
+                        gripper_command(gripper, fingers),
+                        gripper.command_limits[0],
+                    )
+                )
             world.update(
                 {
                     f"{name}/pose_world": pose,
@@ -351,9 +376,7 @@ class ManipulationEnvironment(ManagerBasedEnv):
             if spec.asset_versions[asset_id] != version:
                 raise ValueError(f"Episode asset version differs: {asset_id}")
         if set(spec.initial_state) != {"scene", "control_targets"}:
-            raise ValueError(
-                "Expected a measured scene snapshot and control targets"
-            )
+            raise ValueError("Expected a measured scene snapshot and control targets")
         self.control_step = self._sim_step_counter = 0
         self.camera_steps.clear()
         self.camera_sync_step = None
@@ -375,7 +398,7 @@ class ManipulationEnvironment(ManagerBasedEnv):
         return self.frame()
 
     def resolve_episode(self, episode_id, seed, *, provenance=None):
-        """Settle a candidate, validate it, then freeze measured simulator state."""
+        """Validate initial robot/support positions, then freeze measured state."""
         self.control_step = self._sim_step_counter = 0
         self.camera_steps.clear()
         self.camera_sync_step = None
@@ -396,70 +419,46 @@ class ManipulationEnvironment(ManagerBasedEnv):
             obj.write_root_velocity_to_sim_index(
                 root_velocity=torch.zeros((1, 6), device=self.device)
             )
-        stable = 0
+        support, _ = workspace(self.collection.scene)
+        ready_steps = 0
         for _ in range(round(5.0 / self.step_dt)):
             frame = self.step(command).frame
-            robot_stable = all(
-                np.max(
-                    np.abs(
-                        frame.observation.values[f"robot/{side}/joint_position"]
-                        - self.collection.deployment.arms[side].initial_positions
+            joint_errors = {
+                side: float(
+                    np.max(
+                        np.abs(
+                            frame.observation.values[f"robot/{side}/joint_position"]
+                            - self.collection.deployment.arms[side].initial_positions
+                        )
                     )
                 )
-                < 0.003
-                and np.max(
-                    np.abs(frame.observation.values[f"robot/{side}/joint_velocity"])
-                )
-                < 0.01
                 for side in ARMS
+            }
+            support_errors = {}
+            for name in self.object_names:
+                measured = frame.world_state[f"{name}/pose_world"]
+                asset = asset_definition(self.collection.scene.objects[name]["asset"])
+                bottom = (
+                    Rotation.from_quat(measured[3:]).apply(corners(asset))
+                    + measured[:3]
+                )[:, 2].min()
+                support_errors[name] = {
+                    "xy_m": float(np.linalg.norm(measured[:2] - candidates[name][:2])),
+                    "height_m": float(abs(bottom - support[2])),
+                }
+            ready = all(error < 0.003 for error in joint_errors.values()) and all(
+                error["xy_m"] <= 0.005 and error["height_m"] <= 0.003
+                for error in support_errors.values()
             )
-            objects_stable = all(
-                maximum_point_speed(
-                    asset_definition(self.collection.scene.objects[name]["asset"]),
-                    frame.world_state[f"{name}/pose_world"],
-                    frame.world_state[f"{name}/velocity_world"],
-                ) < 0.005
-                for name in self.object_names
-            )
-            stable = stable + 1 if robot_stable and objects_stable else 0
-            if stable * self.step_dt >= 0.25:
+            ready_steps = ready_steps + 1 if ready else 0
+            if ready_steps * self.step_dt >= 0.25:
                 break
         else:
-            diagnostics = {
-                "objects": {
-                    name: {
-                        "pose": frame.world_state[f"{name}/pose_world"].tolist(),
-                        "velocity": frame.world_state[
-                            f"{name}/velocity_world"
-                        ].tolist(),
-                    }
-                    for name in self.object_names
-                },
-                "robot": {
-                    side: frame.observation.values[
-                        f"robot/{side}/joint_velocity"
-                    ].tolist()
-                    for side in ARMS
-                },
-            }
             raise RuntimeError(
-                f"Candidate failed to settle within five seconds: {diagnostics}"
+                "Candidate did not reach its initial robot/support positions within "
+                f"five seconds: joint_errors_rad={joint_errors}, "
+                f"support_errors={support_errors}"
             )
-        support, _ = workspace(self.collection.scene)
-        for name in self.object_names:
-            candidate = candidates[name]
-            measured = frame.world_state[f"{name}/pose_world"]
-            asset = asset_definition(self.collection.scene.objects[name]["asset"])
-            bottom = (
-                Rotation.from_quat(measured[3:]).apply(corners(asset)) + measured[:3]
-            )[:, 2].min()
-            if (
-                np.linalg.norm(measured[:2] - candidate[:2]) > 0.005
-                or abs(bottom - support[2]) > 0.003
-            ):
-                raise RuntimeError(
-                    f"Candidate moved outside its accepted support pose: {name}"
-                )
         state = _tree_map(self.scene.get_state(), lambda v: v.cpu().tolist())
         return EpisodeSpec(
             id=episode_id,
@@ -470,11 +469,15 @@ class ManipulationEnvironment(ManagerBasedEnv):
                 "object_candidates": {
                     name: value.tolist() for name, value in candidates.items()
                 },
-                "settling_steps": self.control_step,
-                "settling_max_point_speed_m_s": 0.005,
+                "initialization_steps": self.control_step,
                 "controllers": self.robot.controller_parameters,
+                "manipulation_profiles": {
+                    side: plain(manipulation_profile(arm))
+                    for side, arm in self.collection.deployment.arms.items()
+                },
                 "gravity_compensation": True,
                 "external_forces_every_iteration": self.cfg.sim.physics.enable_external_forces_every_iteration,
+                "camera_mounts": self.camera_mounts.resolved,
                 "camera_intrinsics": {
                     camera.name: self.scene[f"camera_{camera.name}"]
                     .data.intrinsic_matrices.torch[0]

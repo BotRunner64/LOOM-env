@@ -31,6 +31,20 @@ from loom_env.embodiments.assets import (
 from loom_env.specs.config import ARMS, DeploymentSpec
 
 
+def spawn_robot(prim_path, cfg, translation=None, orientation=None, **kwargs):
+    """Enable contact reports on nested URDF bodies before sensor initialization."""
+    prim = sim_utils.spawn_from_usd(
+        prim_path, cfg, translation=translation, orientation=orientation, **kwargs
+    )
+    if cfg.activate_contact_sensors:
+        stage = get_current_stage()
+        for path in sim_utils.find_matching_prim_paths(prim_path):
+            for body in Usd.PrimRange(stage.GetPrimAtPath(path)):
+                if body.HasAPI(UsdPhysics.RigidBodyAPI):
+                    sim_utils.activate_contact_sensors(str(body.GetPath()))
+    return prim
+
+
 def articulation_config(arm, asset_root):
     """Resolve a supported asset and its simulation actuator configuration."""
     if arm.asset == PANDA_ASSET:
@@ -90,6 +104,7 @@ def articulation_config(arm, asset_root):
             soft_joint_pos_limit_factor=1.0,
         )
         version = f"{model['source']}-{SOURCES[model['source']]['revision']}:isaac-import-v{PREPARATION_VERSION}"
+    cfg.spawn.func = spawn_robot
     cfg.init_state.pos = arm.base_pose[:3]
     cfg.init_state.rot = arm.base_pose[3:]
     opened = np.array([high for _, high in arm.gripper.command_limits])

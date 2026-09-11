@@ -49,17 +49,18 @@ cameras:
     period_steps: 1
     parent_frame: world
     pose: [2.0, 0.0, 1.9, 0.3681179873103491, 0.3681179873103491, 0.6037293660396003, 0.6037293660396003]
+  # ManiSkill camera_link optical offset; axis derivation: docs/embodiments.md.
   - name: left_wrist
     width: 640
     height: 480
     period_steps: 1
-    parent_frame: left/link6
-    pose: [0.07, 0, 0.04, 0.690322957027, 0.690322957027, 0.153147690159, 0.153147690159]
+    parent_frame: left/camera_link
+    pose: [0, 0, -0.05, 0, 0, -0.7071067811865476, 0.7071067811865476]
     focal_length: 16.0
   - name: right_wrist
     width: 640
     height: 480
     period_steps: 1
-    parent_frame: right/link6
-    pose: [0.07, 0, 0.04, 0.690322957027, 0.690322957027, 0.153147690159, 0.153147690159]
+    parent_frame: right/camera_link
+    pose: [0, 0, -0.05, 0, 0, -0.7071067811865476, 0.7071067811865476]
     focal_length: 16.0

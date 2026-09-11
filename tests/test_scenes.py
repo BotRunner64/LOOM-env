@@ -7,6 +7,7 @@ import pytest
 from loom_env.scenes.workspace import sample_objects
 from loom_env.specs.config import load_collection
 from loom_env.embodiments.contacts import opposing_contacts
+from loom_env.embodiments.commands import gripper_command
 from loom_env.experts.pick_place import PickPlaceExpert
 from loom_env.runtime.runner import SourceFailure
 from loom_env.tasks import create_task
@@ -70,10 +71,13 @@ def test_workspace_transform_moves_all_instances_consistently(collection):
 @pytest.mark.parametrize(
     "condition", ["no_force", "one_finger", "parallel", "closed", "fully_open"]
 )
-def test_grasp_requires_physical_opposing_contacts(condition):
+def test_grasp_requires_physical_opposing_contacts(condition, collection):
+    gripper = collection.deployment.arms["right"].gripper
     forces = np.array([[0.0, 2.0, 0.0], [0.0, -2.0, 0.0]])
     fingers = [0.012, 0.012]
-    assert opposing_contacts(forces, fingers)
+    assert opposing_contacts(
+        forces, gripper_command(gripper, np.array(fingers)), gripper.command_limits[0]
+    )
     if condition == "no_force":
         forces *= 0
     elif condition == "one_finger":
@@ -84,7 +88,9 @@ def test_grasp_requires_physical_opposing_contacts(condition):
         fingers = [0, 0]
     else:
         fingers = [0.04, 0.04]
-    assert not opposing_contacts(forces, fingers)
+    assert not opposing_contacts(
+        forces, gripper_command(gripper, np.array(fingers)), gripper.command_limits[0]
+    )
 
 
 class UnusedPlanner:
@@ -120,17 +126,3 @@ def test_contacts_without_lift_cannot_start_transfer(spec, frame_factory):
     expert.stage_index = expert.STAGES.index("transfer")
     with pytest.raises(SourceFailure, match="not physically lifted"):
         expert.act(frame.observation)
-
-
-def test_rest_check_accounts_for_asset_size_without_mixing_units():
-    from loom_env.assets.catalog import asset_definition
-    from loom_env.scenes.workspace import maximum_point_speed
-
-    asset = asset_definition("robodojo:brick")
-    pose = [0, 0, 0, 0, 0, 0, 1]
-    assert maximum_point_speed(asset, pose, [0.001, 0, 0, 0, 0, 0]) == pytest.approx(
-        0.001
-    )
-    rotating = maximum_point_speed(asset, pose, [0, 0, 0, 0, 0, 1])
-    assert 0.03 < rotating < 0.04
-    assert maximum_point_speed(asset, pose, [0, 0, 0, 0, 0, 0]) == 0

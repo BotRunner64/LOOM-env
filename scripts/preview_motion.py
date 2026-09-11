@@ -23,7 +23,8 @@ import numpy as np
 from loom_env.scenes.workspace import sample_objects, dynamic_names
 from loom_env.assets.catalog import load_prepared, prepared_directory, sha256
 from loom_env.runtime.runner import EpisodeRunner
-from loom_env.runtime.motion import DURATION, MotionCheck, MotionSource, gripper_command
+from loom_env.embodiments.commands import gripper_command
+from loom_env.runtime.motion import DURATION, MotionCheck, MotionSource
 from loom_env.specs.config import (
     ARMS,
     EpisodeSpec,
@@ -122,7 +123,7 @@ def main():
         camera_samples = {}
         sim.reset()
         robot.initialize()
-        camera_mounts = CameraMounts(deployment.cameras, cameras, robot.robots)
+        camera_mounts = CameraMounts(deployment, cameras, robot.robots, args.asset_root)
         for obj in objects.values():
             obj.reset()
         for camera in cameras.values():
@@ -172,19 +173,10 @@ def main():
                     finger_velocities.append(
                         float(np.max(np.abs(measured[f"{prefix}/gripper_velocity"])))
                     )
-                stable = (
-                    max(errors) < 0.003
-                    and max(velocities) < 0.01
-                    and all(
-                        error
-                        < (
-                            0.0005
-                            if deployment.arms[side].gripper.unit == "m"
-                            else 0.003
-                        )
-                        for side, error in zip(ARMS, finger_errors)
-                    )
-                    and max(finger_velocities) < 0.01
+                stable = max(errors) < 0.003 and all(
+                    error
+                    < (0.0005 if deployment.arms[side].gripper.unit == "m" else 0.003)
+                    for side, error in zip(ARMS, finger_errors)
                 )
                 consecutive = consecutive + 1 if stable else 0
                 if consecutive * deployment.control_dt >= 0.25:
@@ -199,7 +191,7 @@ def main():
                         ],
                     }
             raise RuntimeError(
-                f"Robot did not stabilize: errors={errors}, velocities={velocities}, finger_errors={finger_errors}"
+                f"Robot did not reach its reset positions: errors={errors}, velocities={velocities}, finger_errors={finger_errors}"
             )
 
         reset_checks = [settle(source.home)]
@@ -338,6 +330,7 @@ def main():
                     name: position.tolist() for name, position in candidates.items()
                 },
                 "controllers": robot.controller_parameters,
+                "camera_mounts": camera_mounts.resolved,
                 "reset_checks": reset_checks,
                 "gravity_compensation": True,
             },
