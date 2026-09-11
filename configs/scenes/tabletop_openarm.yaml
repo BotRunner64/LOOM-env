@@ -1,0 +1,60 @@
+# Work area near the rear edge, reached from the official floor-mounted OpenArm v1 pedestal.
+id: tabletop_openarm
+objects:
+  table:
+    asset: maniskill:table
+    category: workspace
+    description: 木质餐桌
+    static: true
+    pose:
+    - 0
+    - 0
+    - 0
+    - 0
+    - 0
+    - 0
+    - 1
+  object:
+    asset: robodojo:brick
+    category: graspable_object
+    description: 红色积木
+    static: false
+    pose:
+    - -0.345
+    - -0.14
+    - 0.0172
+    - 0
+    - 0
+    - 0
+    - 1
+    position_min:
+    - -0.35
+    - -0.145
+    position_max:
+    - -0.34
+    - -0.135
+  basket:
+    asset: robodojo:basket
+    category: receptacle
+    description: 灰色收纳篮
+    static: false
+    pose:
+    - -0.34
+    - 0.05
+    - 0.03857
+    - 0
+    - 0
+    - 0
+    - 1
+parameters:
+  workspace_pose:
+  - 0.45
+  - 0
+  - 0.75
+  - 0
+  - 0
+  - 0
+  - 1
+  workspace_size:
+  - 0.96
+  - 1.9

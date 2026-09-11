@@ -110,3 +110,22 @@ def test_usdz_reference_preserves_authored_physics(tmp_path, monkeypatch):
         .Get()
         == "convexDecomposition"
     )
+
+
+def test_tabletop_replacement_preserves_lower_geometry():
+    import numpy as np
+    import trimesh
+    from loom_env.assets.prepare import table_collision_parts
+
+    top = trimesh.creation.box(extents=(1, 2, 0.04))
+    top.apply_translation((0, 0, -0.02))
+    leg = trimesh.creation.box(extents=(0.1, 0.1, 0.7))
+    leg.apply_translation((0.3, 0.6, -0.4))
+    source = trimesh.util.concatenate([top, leg])
+    lower, slab = table_collision_parts(source.vertices, source.faces, top.bounds)
+    np.testing.assert_allclose(lower.bounds, leg.bounds)
+    assert lower.volume == pytest.approx(leg.volume)
+    np.testing.assert_allclose(slab.bounds, top.bounds)
+    assert slab.is_watertight
+    with pytest.raises(ValueError, match="one tabletop"):
+        table_collision_parts(source.vertices, source.faces, top.bounds + 0.1)

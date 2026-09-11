@@ -64,6 +64,28 @@ def mesh_arrays(prims):
     return vertices, triangles
 
 
+def table_collision_parts(vertices, triangles, tabletop_bounds):
+    """Replace exactly the measured top component, retaining all lower geometry."""
+    import trimesh
+
+    source = trimesh.Trimesh(vertices, triangles, process=True)
+    components = source.split(only_watertight=False)
+    selected = [
+        part
+        for part in components
+        if np.allclose(part.bounds, tabletop_bounds, atol=1e-5, rtol=0)
+    ]
+    if len(selected) != 1:
+        raise ValueError("Expected one tabletop component matching the catalog bounds")
+    lower = trimesh.util.concatenate(
+        [part for part in components if part is not selected[0]]
+    )
+    bounds = np.asarray(tabletop_bounds)
+    slab = trimesh.creation.box(extents=bounds[1] - bounds[0])
+    slab.apply_translation(bounds.mean(axis=0))
+    return lower, slab
+
+
 def prepare_scene_assets(asset_root, source_root, repository):
     from pxr import Gf, Usd, UsdGeom, UsdPhysics
 
@@ -132,12 +154,28 @@ def prepare_scene_assets(asset_root, source_root, repository):
         actual = np.array([vertices.min(axis=0), vertices.max(axis=0)])
         if not np.allclose(actual, definition.bounds, atol=0.001, rtol=0):
             raise ValueError(f"Source dimensions differ: {asset_id}: {actual}")
+        source_triangle_count = len(triangles)
         if mesh_only:
-            # GLB has no source physics. Author a static triangle surface with
-            # identical geometry after the workspace coordinate conversion.
+            # GLB has no source physics. Use a flat primitive for the tabletop
+            # and retain the source lower geometry after coordinate conversion.
             for prim in collision_prims:
                 prim.RemoveAPI(UsdPhysics.CollisionAPI)
                 prim.RemoveAPI(UsdPhysics.MeshCollisionAPI)
+            if definition.tabletop_bounds is None:
+                raise ValueError(
+                    f"Mesh workspace needs reviewed tabletop bounds: {asset_id}"
+                )
+            lower, slab = table_collision_parts(
+                vertices, triangles, definition.tabletop_bounds
+            )
+            vertices, triangles = np.asarray(lower.vertices), np.asarray(lower.faces)
+            bounds = np.asarray(definition.tabletop_bounds)
+            top = UsdGeom.Cube.Define(stage, "/Asset/Tabletop")
+            top.CreateSizeAttr(1.0)
+            top.AddTranslateOp().Set(Gf.Vec3d(*bounds.mean(axis=0)))
+            top.AddScaleOp().Set(Gf.Vec3f(*(bounds[1] - bounds[0])))
+            top.CreateVisibilityAttr("invisible")
+            UsdPhysics.CollisionAPI.Apply(top.GetPrim())
             collider = UsdGeom.Mesh.Define(stage, "/Asset/Collision")
             collider.CreatePointsAttr(vertices.tolist())
             collider.CreateFaceVertexCountsAttr([3] * len(triangles))
@@ -148,6 +186,14 @@ def prepare_scene_assets(asset_root, source_root, repository):
             UsdPhysics.MeshCollisionAPI.Apply(
                 collider.GetPrim()
             ).CreateApproximationAttr("none")
+            # The planner sees precisely the same slab and retained lower mesh.
+            import trimesh
+
+            planning = trimesh.util.concatenate([lower, slab])
+            vertices, triangles = (
+                np.asarray(planning.vertices),
+                np.asarray(planning.faces),
+            )
         elif source_physics(stage) != source_physics(source_stage):
             raise ValueError(f"Imported USDZ physics differs from source: {asset_id}")
         # References become relative only at export; source model bytes are intact.
@@ -167,7 +213,10 @@ def prepare_scene_assets(asset_root, source_root, repository):
             "source": asdict(definition),
             "preparation_version": PREPARATION_VERSION,
             "bounds": actual.tolist(),
-            "source_collision_triangles": len(triangles),
+            "source_collision_triangles": source_triangle_count,
+            "collision_representation": "box_top_and_source_legs"
+            if mesh_only
+            else "source",
             "physics": source_physics(prepared),
             "source_physics_preserved": not mesh_only,
             "versions": {

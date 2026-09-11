@@ -18,14 +18,22 @@ class UnusedPlanner:
         pass
 
 
-@pytest.mark.parametrize("name", ["panda", "piper"])
+@pytest.mark.parametrize(
+    "name", ["panda", "piper", "x5", "ur5_wsg", "yam", "xarm6_robotiq", "openarm"]
+)
 @pytest.mark.parametrize("base_yaw", [0.0, 0.7])
 def test_grasp_goal_places_contact_center_on_object(collection, name, base_yaw):
     deployment = load_deployment(ROOT / f"configs/deployments/dual_{name}.yaml")
     arm = deployment.arms["right"]
     arm = replace(
         arm,
-        base_pose=(*arm.base_pose[:3], *Rotation.from_euler("z", base_yaw).as_quat()),
+        base_pose=(
+            *arm.base_pose[:3],
+            *(
+                Rotation.from_euler("z", base_yaw)
+                * Rotation.from_quat(arm.base_pose[3:])
+            ).as_quat(),
+        ),
     )
     deployment = replace(deployment, arms={**deployment.arms, "right": arm})
     collection = replace(collection, deployment=deployment)
@@ -37,7 +45,9 @@ def test_grasp_goal_places_contact_center_on_object(collection, name, base_yaw):
         expert.profile.tcp_to_grasp
     )
     np.testing.assert_allclose(contact_center, object_pose[:3] + expert.asset.grasp)
-    opening_axis = Rotation.from_quat(goal[3:]).apply([0, 1, 0])
+    opening_axis = Rotation.from_quat(goal[3:]).apply(
+        [1, 0, 0] if name == "ur5_wsg" else [0, 1, 0]
+    )
     assert abs(opening_axis[2]) < 1e-12
     if name == "piper":
         # A top grasp must preserve Piper's normal finger order, not roll it over.
@@ -108,3 +118,37 @@ def test_retreat_returns_to_measured_pose_before_lowering(spec, frame_factory):
     values["robot/right/tcp_pose_world"] = reached - [0, 0, 0.08, 0, 0, 0, 0]
     goal = expert._goal(frame.world_state, replace(frame.observation, values=values))
     np.testing.assert_array_equal(goal, reached)
+
+
+@pytest.mark.parametrize("limits", [(0.0, 0.08), (0.0, 0.81), (0.0054, 0.11)])
+def test_contact_evidence_uses_fraction_for_linear_and_angular_commands(limits):
+    low, high = limits
+    forces = np.array([[0, 2, 0], [0, -2, 0]])
+    assert opposing_contacts(forces, low + 0.4 * (high - low), limits)
+    for fraction in (0.0, 0.02, 0.995, 1.0):
+        assert not opposing_contacts(forces, low + fraction * (high - low), limits)
+    assert not opposing_contacts(-np.abs(forces), low + 0.4 * (high - low), limits)
+
+
+@pytest.mark.parametrize("name", ["yam", "xarm6_robotiq", "openarm"])
+def test_float32_opening_boundary_survives_validation_and_revalidation(name):
+    from loom_env.embodiments.commands import initial_command
+
+    deployment = load_deployment(ROOT / f"configs/deployments/dual_{name}.yaml")
+    command = initial_command(deployment).astype(np.float32)
+    accepted = deployment.validate_action(command)
+    np.testing.assert_array_equal(deployment.validate_action(accepted), command)
+    command[deployment.action_slices["right/gripper"]] += 1e-5
+    with pytest.raises(ValueError, match="exceeds right/gripper"):
+        deployment.validate_action(command)
+
+
+def test_yam_opening_matches_tip_geometry_direction():
+    deployment = load_deployment(ROOT / "configs/deployments/dual_yam.yaml")
+    gripper = deployment.arms["right"].gripper
+    mapping = np.asarray(gripper.joint_map)
+    # At q=0 the CAD tips meet; negative joint travel separates them.
+    np.testing.assert_allclose(mapping @ [0.0] + gripper.joint_offset, [0.0, 0.0])
+    np.testing.assert_allclose(
+        mapping @ [0.0939] + gripper.joint_offset, [-0.04695, -0.04695]
+    )

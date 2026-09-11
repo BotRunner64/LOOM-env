@@ -1,6 +1,9 @@
 """Reviewed grasp geometry and native planner models for supported embodiments."""
 
 from dataclasses import dataclass
+from itertools import combinations
+import json
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import numpy as np
@@ -45,6 +48,50 @@ PROFILES = {
         (0.0, 0.9659258262890683, 0.0, 0.25881904510252074),
         ("base_link",),
     ),
+    "robotwin:x5": ParallelJaw(
+        "link6",
+        ("link7", "link8"),
+        (0.145, 0.0, 0.0),
+        (0.0, 0.7071067811865476, 0.0, 0.7071067811865476),
+        ("base_link",),
+    ),
+    "robotwin:ur5-wsg": ParallelJaw(
+        "wrist_3_link",
+        ("gripper_left", "gripper_right"),
+        (0.0, 0.222, 0.0),
+        (-0.5, -0.5, 0.5, 0.5),
+        ("base_link",),
+    ),
+    "i2rt:yam-v1": ParallelJaw(
+        "gripper",
+        ("tip_left", "tip_right"),
+        (0.0, 0.0, -0.135),
+        (0.0, 0.0, 1.0, 0.0),
+        ("base",),
+    ),
+    "maniskill:xarm6-robotiq": ParallelJaw(
+        "link6",
+        ("left_inner_finger", "right_inner_finger"),
+        (0.0, 0.0, 0.152),
+        (1.0, 0.0, 0.0, 0.0),
+        ("link_base",),
+    ),
+    **{
+        f"enactic:openarm-{side}": ParallelJaw(
+            f"openarm_{side}_link7",
+            (f"openarm_{side}_right_finger", f"openarm_{side}_left_finger"),
+            (0.0, 0.0, 0.17),
+            # Undo the official side-mounted shoulder roll for a downward palm.
+            (
+                0.0,
+                0.7071054825112363,
+                0.7071080798594735 * (1 if side == "left" else -1),
+                0.0,
+            ),
+            (f"openarm_{side}_link0",),
+        )
+        for side in ("left", "right")
+    },
 }
 PIPER_PLANNING_FILES = {
     "curobo_tmp.yml": "635fb098c64ab1e274039f19bf51a710ed4d2628ce819b989387f78277198067",
@@ -59,10 +106,8 @@ def manipulation_profile(arm):
         raise ValueError(f"No manipulation profile for {arm.asset}") from error
     if arm.tcp_frame != profile.tcp_frame:
         raise ValueError("Manipulation profile and deployment TCP disagree")
-    if arm.gripper.unit != "m" or len(arm.gripper.command_names) != 1:
-        raise ValueError(
-            "Parallel-jaw manipulation requires one linear opening command"
-        )
+    if len(arm.gripper.command_names) != 1:
+        raise ValueError("Parallel-jaw manipulation requires one opening command")
     return profile
 
 
@@ -139,6 +184,100 @@ def planner_robot(arm, asset_root):
         kin["self_collision_buffer"]["attached_object"] = 0.0
         robot = {"robot_cfg": {"kinematics": kin}}
     else:
-        raise ValueError(f"No planner model for {arm.asset}")
+        robot = _urdf_planner_robot(arm, asset_root)
     robot["robot_cfg"]["kinematics"]["extra_collision_spheres"] = {"attached_object": 8}
     return robot
+
+
+def _urdf_planner_robot(arm, asset_root):
+    """Use mesh-fitted geometry and the same structural exclusions as physics."""
+    name = model_name(arm.asset)
+    verify_asset(asset_root, name)
+    urdf = prepared_urdf(asset_root, name)
+    path = urdf.parent / "planning.json"
+    if not path.is_file():
+        raise FileNotFoundError(
+            f"Missing {path}; run scripts/prepare_planning.py {name}"
+        )
+    data = json.loads(path.read_text())
+    if data["urdf_sha256"] != sha256(urdf):
+        raise ValueError(f"Stale planning geometry: {path}")
+    spheres = data["collision_spheres"]
+    tree = ET.parse(urdf).getroot()
+    parents = {j.find("child").get("link"): j for j in tree.findall("joint")}
+
+    def body(link):
+        while link in parents and parents[link].get("type") == "fixed":
+            link = parents[link].find("parent").get("link")
+        return link
+
+    adjacent = {
+        frozenset(
+            (body(j.find("parent").get("link")), body(j.find("child").get("link")))
+        )
+        for j in parents.values()
+    }
+    for group in MODELS[name].get("collision_groups", ()):
+        adjacent.update(frozenset(pair) for pair in combinations(group, 2))
+    ignore = {link: [] for link in spheres}
+    for a, b in combinations(spheres, 2):
+        if body(a) == body(b) or frozenset((body(a), body(b))) in adjacent:
+            ignore[a].append(b)
+    # The attached object intentionally touches the gripper; retain arm collisions.
+    gripper_links = []
+    for link in spheres:
+        ancestor = link
+        while ancestor in parents and ancestor != arm.tcp_frame:
+            ancestor = parents[ancestor].find("parent").get("link")
+        if ancestor == arm.tcp_frame:
+            gripper_links.append(link)
+    ignore["attached_object"] = gripper_links
+    opened = np.array([high for _, high in arm.gripper.command_limits])
+    fingers = np.asarray(arm.gripper.joint_map) @ opened + arm.gripper.joint_offset
+    independent = {
+        j.get("name") for j in tree.findall("joint") if j.find("mimic") is None
+    }
+    locked = {
+        joint: float(q)
+        for joint, q in zip(arm.gripper.joint_names, fingers)
+        if joint in independent
+    }
+    joints = [*arm.joint_names, *locked]
+    return {
+        "robot_cfg": {
+            "kinematics": {
+                "format_version": 2.0,
+                "urdf_path": str(urdf.resolve()),
+                "asset_root_path": str(urdf.parent.resolve()),
+                "base_link": MODELS[name]["base"],
+                "tool_frames": [arm.tcp_frame],
+                "collision_link_names": [*spheres, "attached_object"],
+                "collision_spheres": spheres,
+                "collision_sphere_buffer": 0.0,
+                "self_collision_ignore": ignore,
+                "self_collision_buffer": {link: 0.0 for link in ignore},
+                "mesh_link_names": list(spheres),
+                "lock_joints": locked,
+                "cspace": {
+                    "joint_names": joints,
+                    "default_joint_position": [
+                        *arm.initial_positions,
+                        *locked.values(),
+                    ],
+                    "null_space_weight": [1.0] * len(joints),
+                    "cspace_distance_weight": [1.0] * len(joints),
+                    "max_acceleration": 15.0,
+                    "max_jerk": 500.0,
+                },
+                "extra_links": {
+                    "attached_object": {
+                        "parent_link_name": arm.tcp_frame,
+                        "link_name": "attached_object",
+                        "joint_name": "attach_joint",
+                        "joint_type": "FIXED",
+                        "fixed_transform": [0, 0, 0, 1, 0, 0, 0],
+                    }
+                },
+            }
+        }
+    }

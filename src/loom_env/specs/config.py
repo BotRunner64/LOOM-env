@@ -272,8 +272,11 @@ class DeploymentSpec:
             bounds = np.asarray(
                 arm.joint_limits if field == "arm" else arm.gripper.command_limits
             )
-            if np.any(action[part] < bounds[:, 0]) or np.any(
-                action[part] > bounds[:, 1]
+            # Isaac Lab transports commands as float32. Permit rounding at a
+            # boundary, while preserving the command and rejecting real overruns.
+            tolerance = np.finfo(np.float32).eps * np.maximum(1.0, np.abs(bounds))
+            if np.any(action[part] < bounds[:, 0] - tolerance[:, 0]) or np.any(
+                action[part] > bounds[:, 1] + tolerance[:, 1]
             ):
                 raise ValueError(
                     f"Action exceeds {key} limits; implicit clipping is disabled"

@@ -24,6 +24,9 @@ class AssetDefinition:
     interior: tuple[tuple[float, float, float], tuple[float, float, float]] | None = (
         None
     )
+    tabletop_bounds: (
+        tuple[tuple[float, float, float], tuple[float, float, float]] | None
+    ) = None
     source_scale: float = 1.0
     source_translation: tuple[float, float, float] = (0.0, 0.0, 0.0)
 
@@ -46,6 +49,12 @@ ASSETS = {
         (
             (-0.34545048 * TABLE_SCALE, -0.69082248 * TABLE_SCALE, -0.75),
             (0.34545048 * TABLE_SCALE, 0.69082248 * TABLE_SCALE, 0.0),
+        ),
+        # Measured top component bounds after source normalization; legs retain
+        # their original triangles. The slab replaces only this component.
+        tabletop_bounds=(
+            (-0.49302134, -0.98593069, -0.035712568),
+            (0.49302134, 0.98593069, 0.0),
         ),
         source_scale=TABLE_SCALE,
         source_translation=(

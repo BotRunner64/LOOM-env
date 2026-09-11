@@ -20,7 +20,7 @@ from loom_env.embodiments.assets import (
     PANDA_VERSION,
     MODELS,
     SOURCES,
-    PREPARATION_VERSION,
+    preparation_version,
     model_name,
     converted_usd,
     prepared_urdf,
@@ -29,6 +29,7 @@ from loom_env.embodiments.assets import (
     validate_visuals,
 )
 from loom_env.specs.config import ARMS, DeploymentSpec
+from loom_env.embodiments.supports import fixed_support
 
 
 def spawn_robot(prim_path, cfg, translation=None, orientation=None, **kwargs):
@@ -103,7 +104,7 @@ def articulation_config(arm, asset_root):
             actuators=actuators,
             soft_joint_pos_limit_factor=1.0,
         )
-        version = f"{model['source']}-{SOURCES[model['source']]['revision']}:isaac-import-v{PREPARATION_VERSION}"
+        version = f"{model['source']}-{SOURCES[model['source']]['revision']}:isaac-import-v{preparation_version(name)}"
     cfg.spawn.func = spawn_robot
     cfg.init_state.pos = arm.base_pose[:3]
     cfg.init_state.rot = arm.base_pose[3:]
@@ -135,6 +136,12 @@ class DualArmArticulation:
                 self.asset_manifests[asset] = verify_asset(
                     asset_root, model_name(asset)
                 )
+        support = fixed_support(deployment, asset_root)
+        if support is not None:
+            self.asset_manifests[MODELS[support.model]["asset"]] = support.manifest
+            self.asset_versions[MODELS[support.model]["asset"]] = support.manifest[
+                "source"
+            ]["revision"]
         for side in ARMS:
             arm = deployment.arms[side]
             cfg, version = articulation_config(arm, asset_root)

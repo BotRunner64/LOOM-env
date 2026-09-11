@@ -98,8 +98,15 @@ MODELS = {
             ),
         ),
     ),
+    "openarm_support": dict(
+        asset="enactic:openarm-support",
+        source="openarm",
+        urdf="assets/robot/openarm_v1.0/urdf/example/v1.urdf",
+        base="openarm_body_link0",
+    ),
     "openarm_left": dict(
         asset="enactic:openarm-left",
+        preparation_version=4,
         source="openarm",
         urdf="assets/robot/openarm_v1.0/urdf/example/v1.urdf",
         base="openarm_left_link0",
@@ -109,6 +116,7 @@ MODELS = {
     ),
     "openarm_right": dict(
         asset="enactic:openarm-right",
+        preparation_version=4,
         source="openarm",
         urdf="assets/robot/openarm_v1.0/urdf/example/v1.urdf",
         base="openarm_right_link0",
@@ -127,6 +135,11 @@ CONVERSION_ARGS = (
     "--headless",
 )
 PREPARATION_VERSION = 3
+
+
+def preparation_version(name):
+    """Allow a model-specific conversion change without invalidating unrelated assets."""
+    return MODELS[name].get("preparation_version", PREPARATION_VERSION)
 
 
 def model_name(asset: str) -> str:
@@ -185,7 +198,7 @@ def verify_asset(asset_root: str | Path, name: str) -> dict:
     if (
         manifest.get("source") != SOURCES[MODELS[name]["source"]]
         or manifest.get("conversion") != list(CONVERSION_ARGS)
-        or manifest.get("preparation_version") != PREPARATION_VERSION
+        or manifest.get("preparation_version") != preparation_version(name)
     ):
         raise ValueError(f"Stale {name} cache; run scripts/prepare_assets.py {name}")
     for key, file in (
@@ -194,6 +207,13 @@ def verify_asset(asset_root: str | Path, name: str) -> dict:
     ):
         if sha256(file) != manifest[key]:
             raise ValueError(f"{name} URDF changed after conversion: {file}")
+    for mesh in ET.parse(prepared_urdf(root, name)).findall(
+        "link/collision/geometry/mesh"
+    ):
+        if any(float(value) < 0 for value in mesh.get("scale", "1 1 1").split()):
+            raise ValueError(
+                f"Unsafe mirrored collision cache; run scripts/prepare_assets.py {name}"
+            )
     files = manifest["usd_files"]
     if str(converted_usd(root, name).relative_to(root)) not in files:
         raise ValueError(f"{name} manifest is missing the root USD")

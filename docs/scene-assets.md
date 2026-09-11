@@ -6,13 +6,13 @@
 
 | 资产 ID | 用途 | 碰撞与功能 |
 | --- | --- | --- |
-| `maniskill:table` | 桌面工作区 | 源 GLB 转 USD，桌面顶中心作为原点，静态三角网格 |
+| `maniskill:table` | 桌面工作区 | 源 GLB 转 USD，桌面顶中心作为原点；桌板为长方体，桌腿保留静态三角网格 |
 | `robodojo:brick` | 动态操作对象 | 保留源动态刚体和凸分解碰撞；补充 Panda 抓取中心 |
 | `robodojo:basket` | 动态目标容器 | 保留源动态刚体和 SDF 碰撞；记录局部放置区域，随实测容器位姿更新 |
 
 源模型来自本机 `/inspire/hdd/global_user/czxs253130598/projects/sim_projects`。RoboDojo 的 `Assets/` 是下载资产仓库的链接。资产准备入口通过 `--source-root` 指向共享目录，缓存统一写入被 Git 忽略的 `.cache/assets/scenes/`，共享源文件保持原样。
 
-ManiSkill GLB 使用 Isaac Lab 的标准 `convert_mesh.py` 转换，作为不含物理定义的工作区网格，按原几何建立静态三角碰撞。
+ManiSkill GLB 使用 Isaac Lab 的标准 `convert_mesh.py` 保留外观。该源文件没有物理定义；桌板碰撞使用资产目录中实测包围尺寸的长方体，桌腿及下方横梁保留原三角网格。准备入口必须找到唯一匹配测量范围的桌板组件才会替换。原桌板三角网格与篮子 SDF 的接触导致持续摆动；长方体提供稳定平面。规划碰撞缓存由同一长方体和下方网格生成，与实际桌子碰撞一致。
 
 RoboDojo USDZ 按字节复制后直接引用，保留刚体层级、凸分解／SDF、质量、摩擦等已有物理配置。加载器不覆盖这些参数。资产目录的动态标记用于校验，场景配置不能把动态源模型改成静态。准备时逐项比较源 USDZ 与缓存引用后的物理 schema 和属性。
 

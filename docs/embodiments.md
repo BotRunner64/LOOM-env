@@ -12,7 +12,76 @@
 | `dual_xarm6_robotiq.yaml` | 6 | 6 个旋转关节 | 张开角坐标 0–0.81 rad | 14 | `link6` |
 | `dual_openarm.yaml` | 7 | 2 个移动关节 | 左 0.016–0.088 m，右 0–0.088 m | 16 | `openarm_left_link7`／`openarm_right_link7` |
 
-当前支持固定安装双臂的关节控制、状态读取、稳定重置、物理运动记录、机械臂 FK 和夹爪耦合一致性检查。末端测量使用表中的刚体坐标系，不等同于指尖抓取中心；Panda 和 Piper 已接入共用抓取放置专家和碰撞感知规划，实际任务验收范围见[实现记录](implementation.md)；其他本体仍处于运动诊断范围，实机标定尚未实现。
+当前支持固定安装双臂的关节控制、状态读取、稳定重置、物理运动记录、机械臂 FK 和夹爪耦合一致性检查。末端测量使用表中的刚体坐标系，不等同于指尖抓取中心；七类本体已接入共用抓取放置专家和碰撞感知规划，实际成功回合与复现入口见下文“抓放录制”；实机标定尚未实现。
+
+## 抓放录制
+
+在仓库根目录，激活本文所述 `loom-env` 环境并配置 EULA／Vulkan 环境变量；先准备机器人和场景资产。新接入模型还需要 CUDA 下生成规划碰撞球：
+
+```bash
+python scripts/prepare_planning.py yam x5 ur5_wsg xarm6_robotiq openarm_left openarm_right
+python scripts/collect.py --deployment configs/deployments/dual_x5.yaml \
+  --scene configs/scenes/tabletop_near.yaml --arm right \
+  --output-dir outputs/x5-pp-repeat --episode-id x5-pp --seed 0
+python scripts/export_video.py outputs/x5-pp-repeat/episodes/x5-pp \
+  outputs/x5-pp-repeat/views.mp4 --camera front left_wrist right_wrist
+```
+
+`prepare_planning.py` 调用已安装 cuRobo 的 `RobotBuilder`，从 URDF 碰撞网格拟合球体；产物和拟合误差指标保存在 `.cache/assets/<model>/planning.json`。当前拟合器忽略 mesh 的 `scale`，因此脚本先在同目录的 `planning/` 中烘焙非单位缩放，再拟合；仿真 URDF 不变。URDF 改变时缓存被拒绝，需要重新生成。自碰撞排除只来自固定合并刚体、相邻刚体及已有物理排除组；不自动忽略初态碰撞或随机采样中未出现的碰撞。固定安装部位只在活动臂规划中豁免，另一臂及场景仍是障碍物。mimic 夹爪只锁定独立关节，保持规划与实际联动关系一致。
+
+抓取点和手掌姿态集中在 `embodiments/manipulation.py`，依据各自夹爪接触几何确定。接触判定使用实测双指力和归一化开口比例，适用于米制开口和 Robotiq 角度命令。动作限位允许 float32 传输的舍入误差，不裁剪动作。夹持、抬升和释放仍由实际物理反馈决定，规划的物体包络不向仿真添加固定约束。
+
+本轮 seed 0、右臂抓放使用同一积木、篮子和 `object_inside_and_released` 成功标准，允许按臂长调整布局；相机安装沿用部署配置。
+
+| 本体 | 场景配置 | 成功回合 | 动作数／仿真时长 |
+| --- | --- | --- | --- |
+| Panda | `tabletop.yaml` | `outputs/all-pp/panda/episodes/panda-pp-001` | 208／10.40 s |
+| Piper | `tabletop_compact.yaml` | `outputs/camera-mounts/grasp/episodes/piper-place-mount-001` | 211／10.55 s |
+| X5 | `tabletop_near.yaml` | `outputs/all-pp/x5/episodes/x5-pp-002` | 231／11.55 s |
+| UR5＋WSG | `tabletop_compact.yaml` | `outputs/all-pp/ur5_wsg/episodes/ur5_wsg-pp-001` | 239／11.95 s |
+| xArm6＋Robotiq | `tabletop_compact.yaml` | `outputs/all-pp/xarm6_robotiq/episodes/xarm6_robotiq-pp-003` | 214／10.70 s |
+| YAM | `tabletop_near.yaml` | `outputs/all-pp/yam/episodes/yam-pp-003` | 330／16.50 s |
+| OpenArm | `tabletop_openarm.yaml`，官方支架整体加高 18 cm | 尚无完整成功回合 | — |
+
+六类成功视频位于 `outputs/all-pp/videos/<model>.mp4`，每个视频并排显示 front、left_wrist、right_wrist。Piper 复用当前相机配置下已经成功的回合，其余五类在本轮新录制。失败尝试保留在各本体目录，不能据其文件存在判断任务成功；检查 Episode `manifest.json` 的 `outcome`。这些结果仅验证所列单个回合，未覆盖多 seed、左右臂角色互换或实机。
+
+X5 的首次抓放已夹起物体，但远端篮子不可达，因此使用近距离横向转移布局。YAM 的开合方向在本轮纠正，历史运动视频中的命令语义不代表当前部署。OpenArm 已恢复官方 v1 支架侧装关系，并按整体加高方案在支架下增加 18 cm 固定底座；双肩世界高度为 0.878 m，初始关节不变。支架位姿从源 URDF 肩部固定变换反解并交叉校验；底座尺寸从支架碰撞网格范围推导，仿真与规划共用，未缩放机器人网格。
+
+
+## OpenArm 加高验证
+
+2026-09-11，原落地支架安装的初始前臂穿入桌板，5 s 后左右关节最大偏差约 16.04°／41.63°，采样净接触力峰值约 18.9 kN。整体加高 18 cm 后，三视角视频中前臂穿桌现象消失；左臂偏差接近零，右臂仍约 4.19°，右指末帧净接触力约 6.65 N（整段峰值约 19.97 N）。这条加高但尚未修复碰撞的历史记录未通过 0.003 rad 的初始化要求；后续修正与验收见下文。
+
+
+随后通过原始 GPU 接触对象路径确认，右指剩余接触来自地面 `GroundPlane/CollisionPlane`，接触点远离可见指尖。仅在诊断场景将镜像碰撞网格的负缩放烘焙进顶点后，地面接触消失，两臂最大关节误差均约 4.77e-8 rad；正式准备入口现已在 URDF 导入前将负缩放烘焙到缓存碰撞网格，保持源 origin、形状与外观；加载器拒绝仍含负碰撞缩放的旧缓存。重新生成 URDF 后必须重建规划球缓存。
+
+篮子的抖动与右指问题独立：消除右指接触后，篮子轨迹保持一致。原桌面三角碰撞与篮子 SDF 接触下，最后 2 s 高度变化范围约 3.93 mm、主要摆角范围约 3.39°；诊断中保持篮子属性和桌高不变，仅换为平整长方体桌面碰撞，末尾高度变化低于 float32 位姿分辨率，主要摆角范围降至约 2.35e-5°。该对照定位到桌面碰撞表示与篮子 SDF 的接触组合，尚未进一步区分三角边界、网格几何和具体接触算法的贡献。正式桌面准备流程现已采用测量尺寸长方体桌板，并保留原桌腿碰撞；规划缓存同步生成。[对照测量](../outputs/openarm-validation/contact-comparison.json)及同目录 `contact-origin.py`、`baked-contact.py`、`flat-table.py` 保存诊断入口；它们使用上述环境设置运行，属于局部诊断，不代表完整抓放验收。
+
+
+正式修复后的验收使用重新准备的场景／OpenArm 资产和同一部署，记录于 [修复视频](../outputs/openarm-validation/fixed-assets/initialization.mp4) 与 [validation.json](../outputs/openarm-validation/fixed-assets/validation.json)：5 s 内双臂最大关节偏差均为约 4.77e-8 rad，采样机器人净接触力为零；最后 2 s 篮子位置、转角在记录精度下无变化。随后重新初始化，通过现有机器人／物体位置验收。完整测试 159 项通过。本轮只验收初始化及静置，不代表完整抓放已通过。
+
+OpenArm 左右臂的转换修订现为 v4，其他机器人维持原修订；修正后的录像完成后补记了该版本号，USD／URDF 内容未再改变。旧版 OpenArm 缓存必须重建，不能与新碰撞混用。复现时先在仓库根目录、激活 `loom-env` 并设置 EULA／Vulkan 后重新准备资产：
+
+```bash
+python scripts/prepare_assets.py scene openarm \
+  --source-root /inspire/hdd/global_user/czxs253130598/projects/sim_projects
+python scripts/prepare_planning.py openarm_left openarm_right
+```
+
+再执行下方初始化录制命令。`measurements.json` 同时保存物体位姿及 `initialization.passed`，用于区分视频生成成功与真实验收通过。
+
+[加高视频](../outputs/openarm-validation/raised-18cm/initialization.mp4)、[加高前视频](../outputs/openarm-validation/initialization-current/initialization.mp4)、[测量对照](../outputs/openarm-validation/raise-comparison.json)。视频为 5 s 物理过程、0.5 倍速，首尾各有停留。记录器先更新运动学和观测再保存首帧；GPU 接触张量记录每个控制步最后一个物理子步的刚体净接触力，不提供接触对象配对，也不代表子步峰值。
+
+在仓库根目录，激活 `loom-env`，准备 OpenArm、场景和规划资产，并设置环境文档中的 EULA／Vulkan 变量后运行（输出目录必须不存在）：
+
+```bash
+python scripts/record_initialization.py \
+  --deployment configs/deployments/dual_openarm.yaml \
+  --scene configs/scenes/tabletop_openarm.yaml \
+  --output-dir outputs/openarm-initialization-repeat
+```
+
+输出 `initialization.mp4`、关键帧 JPG 和 `measurements.json`。检查侧面／后侧画面中桌板与前臂的间隙，并核对关节偏差和净接触力；视频生成成功不等于初始化验收通过。
 
 ## 资产来源与存放
 
@@ -80,8 +149,8 @@ python scripts/check_kinematics.py \
 
 - 当前 URDF 导入器会丢失 GLB 外观。准备入口用固定版本 Trimesh 将 GLB 转成带材质的 OBJ，保留子网格及节点变换；转换后及仿真启动时都检查每个刚体是否具有可见网格，避免只有碰撞几何却看不到本体。
 - UR5 源文件的夹爪关节含重复 `<limit>`；保留第一份完整定义，避免不同解析器得到不同结果。左右指使用 `[-0.5, +0.5]` 的宽度映射。
-- Robotiq 源 URDF 是开链模型，ManiSkill 另在 SAPIEN 中添加四杆闭环约束。本实现用五条理想平行连杆 mimic 关系表达对应角度约束，仅驱动主关节；从动关节的 PD 为零。其轻型连杆在源 URDF 的 1000 N·m 上限下会发生数值失稳，诊断采用 1 N·m 夹爪力矩上限和 0.001 kg·m² 关节转动惯量，参数属于仿真控制配置。沿用 ManiSkill 对夹爪内部及相邻腕部的碰撞排除，保留与外部物体及其他机械臂的碰撞。夹爪的接触抓持能力还需完整任务验证。
-- YAM 保留官方 URDF 的关节轴、惯性、位置限位和随附夹爪。源文件只有外观网格，准备入口使用相同网格及局部变换补充碰撞几何：连杆和夹爪壳体使用凸包，两指使用 PhysX 原生凸分解，保留外部接触面的凹陷。单凸包造成指间约 492 N 的内部干涉；凸分解后仍存在指间接触与抖动，因此沿用官方平行夹爪 MJCF 的指间排除规则，仅过滤 `tip_left`／`tip_right`，保留它们与物体、其他连杆和另一臂的碰撞。夹爪零位为张开，两个关节范围均为约 `[-0.04695, 0]` m，命令映射为 `q7 = q8 = width / 2 - 0.04695`。因此 `width` 表示模型开合坐标，尚未标定为实机指尖距离。末端测量使用 `gripper` 刚体坐标系。诊断沿用该 URDF 的 1 N·m 机械臂力矩、1 N 夹爪力和 1 rad/s／m/s 速度上限；这些导出模型中的数值不代表已校验的实机驱动参数。
+- Robotiq 源 URDF 是开链模型，ManiSkill 另在 SAPIEN 中添加四杆闭环约束。本实现用五条理想平行连杆 mimic 关系表达对应角度约束，仅驱动主关节；从动关节的 PD 为零。其轻型连杆在源 URDF 的 1000 N·m 上限下会发生数值失稳，诊断采用 1 N·m 夹爪力矩上限和 0.001 kg·m² 关节转动惯量，参数属于仿真控制配置。沿用 ManiSkill 对夹爪内部及相邻腕部的碰撞排除，保留与外部物体及其他机械臂的碰撞。抓持验收以完整回合的双指接触、抬升和释放结果为准，见下文“抓放录制”。
+- YAM 保留官方 URDF 的关节轴、惯性、位置限位和随附夹爪。源文件只有外观网格，准备入口使用相同网格及局部变换补充碰撞几何：连杆和夹爪壳体使用凸包，两指使用 PhysX 原生凸分解，保留外部接触面的凹陷。单凸包造成指间约 492 N 的内部干涉；凸分解后仍存在指间接触与抖动，因此沿用官方平行夹爪 MJCF 的指间排除规则，仅过滤 `tip_left`／`tip_right`，保留它们与物体、其他连杆和另一臂的碰撞。两个关节范围均为约 `[-0.04695, 0]` m。指尖几何检查表明 `q=0` 时两指尖接近闭合，`q=-0.04695` 时张开，因此命令映射为 `q7 = q8 = -width / 2`。早期运动诊断使用了相反的开合方向；关节行程检查无法发现这一语义错误，本轮通过接触几何检查纠正。因此 `width` 表示模型开合坐标，尚未标定为实机指尖距离。末端测量使用 `gripper` 刚体坐标系。诊断沿用该 URDF 的 1 N·m 机械臂力矩、1 N 夹爪力和 1 rad/s／m/s 速度上限；这些导出模型中的数值不代表已校验的实机驱动参数。
 - OpenArm 保留左右臂各自的模型和原生夹爪 mimic，按部署中的安装位姿分别生成。当前凸包碰撞模型在腕部 `link5`／`link7` 间产生内部干涉，接触诊断测得约 3.1 kN 的非预期力；只排除该碰撞对，其余自碰撞及外部碰撞保持启用。当前左爪的指间碰撞在开合坐标约 0.015 m 时发生，左侧命令下限据此设为 0.016 m，右侧保持 0 m。这是当前仿真资产的可达控制范围，不是实机指尖距离标定值。
 
 `DualArmArticulation` 提供 `initialize()`、`reset(command)`、`submit(command)`、`observe()`、`write_data_to_sim()` 和 `update(dt)`；调用方拥有物理时钟。启动时校验关节顺序、限位、夹爪映射、末端刚体、固定基座和碰撞几何。两臂命令在写入前一起校验。

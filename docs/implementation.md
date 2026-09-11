@@ -35,7 +35,7 @@ python scripts/prepare_assets.py scene \
 
 默认写入 `.cache/assets/scenes/`。源路径和内容哈希必须与 `assets/catalog.py` 对应。该命令不修改共享源资产；木桌通过 Isaac Lab 的标准 MeshConverter 转 USD，物体与篮子直接引用缓存中的源 USDZ。
 
-RoboDojo USDZ 直接引用，保留原始动态刚体、凸分解／SDF、材质和物理属性，准备流程检查引用前后的物理配置一致。场景中的篮子保持动态，其位姿、速度、接触、重置和重放与其他动态物体走同一条链。ManiSkill 桌子源文件只有 GLB 网格，按转换后的原几何建立静态三角碰撞。
+RoboDojo USDZ 直接引用，保留原始动态刚体、凸分解／SDF、材质和物理属性，准备流程检查引用前后的物理配置一致。场景中的篮子保持动态，其位姿、速度、接触、重置和重放与其他动态物体走同一条链。ManiSkill 桌子源文件只有 GLB 网格；桌板按实测尺寸建立静态长方体碰撞，桌腿及下方横梁保留原三角网格，以消除桌板三角网格与篮子 SDF 接触时的持续摆动。外观保持原样，转换与验证方式见[场景资产文档](scene-assets.md)。
 
 规划器读取源碰撞网格及实时世界位姿，不改动物理资产。cuRobo 源网格表示与 PhysX 烹饪后的凸分解／SDF 存在表示差异，任务执行验收仍是必要条件。
 每个缓存目录包含 `asset.usda`、`collision.npz`、源模型及材质依赖、`asset.json`。缓存清单记录定义指纹、准备版本、转换版本和各文件 SHA-256。加载时拒绝缺失、被修改或定义已变化的缓存；Episode 保存对应版本与来源信息。
@@ -190,6 +190,6 @@ python scripts/inspect_data.py episode outputs/piper-repeat/episodes/piper-place
 
 切换 `--collection configs/collection/lift.yaml` 即抓起任务；更换 `--deployment`、`--scene`、`--seed` 分别控制本体、布局配置和采样。每次使用新的 episode ID。成功时终端输出 `RESULT` 的 `outcome.code=success`；失败时同一记录保留阶段事件、物理状态及图像，可用相同视频入口检查。
 
-已有 Episode 保存生成时的任务定义；物理重放应使用对应代码版本，按新标准重新判定需显式选用当前任务定义并另存结果。当前接触测量与专家已接入 Panda 和 Piper，Piper 的物理验收进度见本文；关节物体、完整厨房、多物体连续整理、异构并行和 Context 配对尚未实现。
+已有 Episode 保存生成时的任务定义；物理重放应使用对应代码版本，按新标准重新判定需显式选用当前任务定义并另存结果。当前接触测量与专家已接入七类本体，逐类抓放验收与复现入口见[本体文档](embodiments.md#抓放录制)；关节物体、完整厨房、多物体连续整理、异构并行和 Context 配对尚未实现。
 
 此前程序化方块场景的历史数据保留在本地输出中，其物理重放应使用生成时的代码版本；当前入口已迁移到真实资产配置，不提供旧场景适配。

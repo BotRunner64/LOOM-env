@@ -18,6 +18,7 @@ from curobo.types import GoalToolPose, JointState, Pose
 
 from loom_env.assets.catalog import asset_definition, collision_mesh
 from loom_env.embodiments.manipulation import manipulation_profile, planner_robot
+from loom_env.embodiments.supports import fixed_support
 from loom_env.runtime.runner import SourceFailure
 
 
@@ -38,13 +39,24 @@ class ArmPlanner:
             )
         self.base = np.asarray(self.arm.base_pose)
         self.rotation = Rotation.from_quat(self.base[3:])
+        self.support = fixed_support(deployment, asset_root)
+        self.support_mesh = None
+        if self.support is not None:
+            with np.load(self.support.collision, allow_pickle=False) as mesh:
+                local = self._local_pose(self.support.pose)
+                self.support_mesh = Mesh(
+                    name="robot_support",
+                    vertices=mesh["vertices"].tolist(),
+                    faces=mesh["faces"].tolist(),
+                    pose=local[[0, 1, 2, 6, 3, 4, 5]].tolist(),
+                )
         robot = planner_robot(self.arm, asset_root)
         self.robot_config_hash = hashlib.sha256(
             json.dumps(robot, sort_keys=True).encode()
         ).hexdigest()
         cfg = MotionPlannerCfg.create(
             robot=robot,
-            collision_cache={"obb": 128, "mesh": 16},
+            collision_cache={"obb": 512, "mesh": 16},
             num_ik_seeds=32,
             num_trajopt_seeds=4,
             random_seed=0,
@@ -98,6 +110,9 @@ class ArmPlanner:
 
     def update_world(self, observation, truth, *, allow_object_contact):
         boxes = []
+        if self.support is not None and (riser := self.support.riser()) is not None:
+            size, pose = riser
+            boxes.append(self._box("robot_support_riser", size, pose))
         other = "left" if self.side == "right" else "right"
         arm = self.deployment.arms[other]
         held = self.holding_model.compute_kinematics(
@@ -113,7 +128,7 @@ class ArmPlanner:
             boxes.append(
                 self._box(f"held_{i}", [2 * sphere[3]] * 3, np.r_[center, [0, 0, 0, 1]])
             )
-        meshes = []
+        meshes = [] if self.support_mesh is None else [self.support_mesh]
         for name in self.scene.objects:
             if name == self.target_object and (allow_object_contact or self.attached):
                 continue
@@ -170,7 +185,7 @@ class ArmPlanner:
         elapsed = time.perf_counter() - start
         if result is None or not bool(result.success.all().item()):
             raise SourceFailure(
-                f"cuRobo failed to reach {np.asarray(goal_world).tolist()}",
+                f"cuRobo failed to reach {np.asarray(goal_world).tolist()} ({getattr(result, 'status', 'no result')})",
                 kind="planning",
             )
         trajectory = (

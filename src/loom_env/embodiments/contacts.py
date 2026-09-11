@@ -14,5 +14,5 @@ def opposing_contacts(forces, opening, command_limits):
     return bool(
         np.all(magnitudes > 0.2)
         and np.dot(forces[0], forces[1]) < -0.5 * np.prod(magnitudes)
-        and low + 0.004 < opening < high - 0.001
+        and 0.05 < (opening - low) / (high - low) < 0.9875
     )

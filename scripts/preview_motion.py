@@ -86,6 +86,7 @@ def main():
         from loom_env.embodiments.cameras import CameraMounts, camera_config
         from loom_env.scenes.isaac_lab import instance_config, simulation_config
         from loom_env.embodiments.isaac_lab import DualArmArticulation
+        from loom_env.embodiments.supports import support_config
 
         sim = sim_utils.SimulationContext(simulation_config(deployment))
 
@@ -104,6 +105,14 @@ def main():
                 )
         light = sim_utils.DomeLightCfg(intensity=600)
         light.func("/World/Light", light)
+        support = support_config(deployment, args.asset_root, "/World/robot_support")
+        if support is not None:
+            support.spawn.func(
+                support.prim_path,
+                support.spawn,
+                translation=support.init_state.pos,
+                orientation=support.init_state.rot,
+            )
         robot = DualArmArticulation(deployment, args.asset_root)
         objects = {
             name: RigidObject(
