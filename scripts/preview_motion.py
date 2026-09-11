@@ -20,7 +20,8 @@ from pathlib import Path
 
 import numpy as np
 
-from loom_env.environments.tabletop import sample_objects, tabletop_geometry
+from loom_env.scenes.workspace import sample_objects, dynamic_names
+from loom_env.assets.catalog import load_prepared, prepared_directory, sha256
 from loom_env.runtime.runner import EpisodeRunner
 from loom_env.runtime.motion import DURATION, MotionCheck, MotionSource, gripper_command
 from loom_env.specs.config import (
@@ -61,8 +62,15 @@ def main():
     collection = load_collection(args.collection)
     if args.deployment:
         collection = replace(collection, deployment=load_deployment(args.deployment))
-    geometry = tabletop_geometry(collection)
-    candidates = sample_objects(collection, args.seed)
+    candidates = sample_objects(collection.scene, args.seed)
+    for obj in collection.scene.objects.values():
+        load_prepared(args.asset_root, obj["asset"])
+    scene_asset_versions = {
+        obj["asset"]: sha256(
+            prepared_directory(args.asset_root, obj["asset"]) / "asset.json"
+        )
+        for obj in collection.scene.objects.values()
+    }
     deployment = collection.deployment
     source = MotionSource(deployment)
 
@@ -75,45 +83,37 @@ def main():
         from isaaclab.assets import RigidObject
         from isaaclab.sensors import Camera
         from loom_env.embodiments.cameras import CameraMounts, camera_config
-        from loom_env.environments.isaac_lab import tabletop_object_config
+        from loom_env.scenes.isaac_lab import instance_config, simulation_config
         from loom_env.embodiments.isaac_lab import DualArmArticulation
-        from isaaclab_physx.physics import PhysxCfg
 
-        sim = sim_utils.SimulationContext(
-            sim_utils.SimulationCfg(
-                dt=deployment.physics_dt,
-                device="cuda:0",
-                physics=PhysxCfg(),
-                render=sim_utils.RenderCfg(ambient_light_intensity=0.3),
-            )
-        )
-
-        def block(path, size, position, color):
-            cfg = sim_utils.CuboidCfg(
-                size=tuple(float(v) for v in size),
-                collision_props=sim_utils.CollisionPropertiesCfg(
-                    contact_offset=0.002, rest_offset=0.0
-                ),
-                visual_material=sim_utils.PreviewSurfaceCfg(
-                    diffuse_color=tuple(float(v) for v in color)
-                ),
-            )
-            cfg.func(path, cfg, translation=tuple(float(v) for v in position))
+        sim = sim_utils.SimulationContext(simulation_config(deployment))
 
         ground = sim_utils.GroundPlaneCfg()
         ground.func("/World/Ground", ground)
-        for name, box in geometry.items():
-            block(f"/World/geometry_{name}", box["size"], box["position"], box["color"])
+        for name, obj in collection.scene.objects.items():
+            if obj["static"]:
+                cfg = instance_config(
+                    obj, f"/World/object_{name}", candidates[name], args.asset_root
+                )
+                cfg.spawn.func(
+                    cfg.prim_path,
+                    cfg.spawn,
+                    translation=cfg.init_state.pos,
+                    orientation=cfg.init_state.rot,
+                )
         light = sim_utils.DomeLightCfg(intensity=600)
         light.func("/World/Light", light)
         robot = DualArmArticulation(deployment, args.asset_root)
         objects = {
             name: RigidObject(
-                tabletop_object_config(
-                    collection.scene.objects[name], f"/World/object_{name}", position
+                instance_config(
+                    collection.scene.objects[name],
+                    f"/World/object_{name}",
+                    candidates[name],
+                    args.asset_root,
                 )
             )
-            for name, position in candidates.items()
+            for name in dynamic_names(collection.scene)
         }
 
         cameras = {
@@ -343,8 +343,7 @@ def main():
             },
             asset_versions={
                 **robot.asset_versions,
-                "primitive:cube": "tabletop-v2",
-                "primitive:open_box": "tabletop-v2",
+                **scene_asset_versions,
             },
             runtime_versions={
                 name: importlib.metadata.version(name)

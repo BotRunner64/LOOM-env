@@ -70,7 +70,7 @@ python scripts/check_kinematics.py \
   outputs/x5/episodes/x5-example-001 --output outputs/x5/kinematics.json
 ```
 
-切换机器人只需更换 `--deployment`。再次录制使用新的 episode ID，已有 episode 不覆盖。自定义资产目录时，准备、预览和运动学检查三个入口传入同一个 `--asset-root`。单独准备 Piper 使用 `python scripts/prepare_assets.py piper`。YAM 使用 `python scripts/prepare_assets.py yam`，预览时传入 `--deployment configs/deployments/dual_yam.yaml`。
+运动预览还需先按[场景资产准备](implementation.md#资产准备)生成真实桌面资产。切换机器人只需更换 `--deployment`。再次录制使用新的 episode ID，已有 episode 不覆盖。自定义资产目录时，准备、预览和运动学检查三个入口传入同一个 `--asset-root`。单独准备 Piper 使用 `python scripts/prepare_assets.py piper`。YAM 使用 `python scripts/prepare_assets.py yam`，预览时传入 `--deployment configs/deployments/dual_yam.yaml`。
 
 准备入口先验证下载包，再处理模型并调用 Isaac Lab 自带的 `convert_urdf.py`。每次转换使用空的临时目录，成功后替换对应模型的生成物。运行前校验上游 URDF、准备后的 URDF、导出网格和全部 USD 生成文件；旧版本缓存需重新准备。移动缓存目录后也应重新准备，因为中间 URDF 使用本地网格绝对路径。
 
@@ -109,7 +109,7 @@ python scripts/export_video.py outputs/pick_place/episodes/panda-place \
 
 ### 首轮相机验证（2026-09-10，历史部署）
 
-七类本体已完成三路 RGB 录制与视角检查。以下产物对应首轮相机配置；后续 Panda 工作区主视角和 tabletop-v2 场景的验收见[当前实现](implementation.md#panda-工作区与目标选择)。Panda 抓取成功（208 个动作、209 帧），其他六类本体分别完成 12 秒运动与夹爪开合诊断（240 个动作、241 帧）。逐帧以相机采样时间对应的实测 TCP 位姿合成安装变换，与独立读取的相机世界位姿比较，位置阈值 0.1 mm、姿态阈值 0.001 rad；均通过。该误差检查验证仿真中的坐标一致性，不表示实机标定精度。
+七类本体已完成三路 RGB 录制与视角检查。以下产物对应首轮相机配置；当前真实资产场景及任务的验收见[当前实现](implementation.md#当前验证边界)。Panda 抓取成功（208 个动作、209 帧），其他六类本体分别完成 12 秒运动与夹爪开合诊断（240 个动作、241 帧）。逐帧以相机采样时间对应的实测 TCP 位姿合成安装变换，与独立读取的相机世界位姿比较，位置阈值 0.1 mm、姿态阈值 0.001 rad；均通过。该误差检查验证仿真中的坐标一致性，不表示实机标定精度。
 
 另用 Panda 的三路相机分别每 1／2／3 个控制步采样，验证缓存图像、时间戳及位姿对齐，并在两臂运动后恢复初态；相机位姿恢复最大分量误差为 1.2e-7。预热后的 RGB 允许渲染噪声，不要求逐像素相等。Panda 完整动作重放再次通过物理任务与逐帧状态比较。
 

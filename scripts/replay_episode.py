@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Restore a tabletop Episode snapshot and physically replay every saved action."""
+"""Restore an Episode snapshot and physically replay every saved action."""
 
 import argparse
 from dataclasses import replace
@@ -16,7 +16,7 @@ from loom_env.runtime.replay import (
 )
 from loom_env.runtime.runner import EpisodeRunner
 from loom_env.specs.config import plain
-from loom_env.tasks.place import PlaceTask
+from loom_env.tasks import create_task
 
 
 def main():
@@ -46,13 +46,13 @@ def main():
         )
         code = 1
         try:
-            from loom_env.environments.isaac_lab import TabletopEnvironment
+            from loom_env.runtime.build import create_environment
 
-            env = TabletopEnvironment(spec.collection, args.asset_root)
+            env = create_environment(spec.collection, args.asset_root)
             comparison = ReplayComparison(original)
             result = EpisodeRunner(
                 ComparingEnvironment(env, comparison),
-                ReplayTask(PlaceTask(spec.collection), len(original)),
+                ReplayTask(create_task(spec.collection), len(original)),
                 RecordedActions(original),
             ).run(spec, args.output_dir)
             report = comparison.report()
@@ -70,7 +70,7 @@ def main():
         except Exception:
             traceback.print_exc()
         finally:
-            launcher.app.close()
+            launcher.app.close(exit_code=code)
     return code
 
 

@@ -14,8 +14,16 @@ ROOT = Path(__file__).resolve().parents[1]
 
 @pytest.fixture
 def collection():
+    value = load_collection(ROOT / "configs/collection/pick_place.yaml")
+    # Stable synthetic instance names keep storage tests independent of presets.
+    objects = dict(value.scene.objects)
+    objects["cube"] = objects.pop("object")
+    objects["container"] = objects.pop("basket")
     return replace(
-        load_collection(ROOT / "configs/collection/pick_place.yaml"), max_steps=3
+        value,
+        scene=replace(value.scene, objects=objects),
+        role_bindings={"target_object": "cube", "container": "container"},
+        max_steps=3,
     )
 
 
@@ -61,6 +69,11 @@ def frame_factory():
                 "cube/pose_world": np.array([*position, 0.0, 0.0, 0.0, 1.0]),
                 "cube/velocity_world": np.zeros(6),
                 "cube/grasped_by": np.array(grasped),
+                "container/pose_world": np.array(
+                    [0.5, 0.0, 0.79565, 0.0, 0.0, 0.0, 1.0]
+                ),
+                "container/velocity_world": np.zeros(6),
+                "container/grasped_by": np.zeros(2, dtype=bool),
                 "container/region_pose_world": np.array(
                     [0.5, 0.0, 0.8, 0.0, 0.0, 0.0, 1.0]
                 ),

@@ -73,6 +73,57 @@ def cuda_check():
     return {"device": torch.cuda.get_device_name(0), "torch_cuda": torch.version.cuda}
 
 
+def curobo_mesh_check():
+    """Small-mesh regression: far spheres stay free and real contacts stay blocked."""
+    from types import SimpleNamespace
+    import torch
+    import trimesh
+    from curobo.scene import Mesh, Scene
+    from curobo._src.geom.collision import (
+        SceneCollision,
+        SceneCollisionCfg,
+        CollisionBuffer,
+    )
+    from curobo._src.types.device_cfg import DeviceCfg
+
+    box = trimesh.creation.box(extents=[0.01, 0.01, 0.01])
+    device = DeviceCfg()
+    scene = SceneCollision.from_config(
+        SceneCollisionCfg(
+            device_cfg=device,
+            scene_model=Scene(
+                mesh=[
+                    Mesh(
+                        name="small_probe",
+                        vertices=box.vertices.tolist(),
+                        faces=box.faces.tolist(),
+                        pose=[0, 0, 0, 1, 0, 0, 0],
+                    )
+                ]
+            ),
+        )
+    )
+    query = torch.tensor(
+        [[[[1.0, 0, 0, 0.08], [0.01, 0, 0, 0.01]]]], device="cuda:0", requires_grad=True
+    )
+    buffer = CollisionBuffer.from_shape(query.shape, device)
+    cost = scene.get_sphere_distance(
+        SimpleNamespace(robot_spheres=query),
+        buffer,
+        torch.tensor([1.0], device="cuda:0"),
+        torch.tensor([0.005], device="cuda:0"),
+    )
+    far, contact = cost.detach().cpu().flatten().tolist()
+    if abs(far) > 1e-7 or contact <= 0:
+        raise RuntimeError(
+            "Small-mesh collision query failed; apply patches/curobo-small-mesh-sdf.patch"
+        )
+    cost.sum().backward()
+    if not torch.isfinite(query.grad).all():
+        raise RuntimeError("Non-finite collision gradient")
+    return {"far_collision_cost": far, "contact_collision_cost": contact}
+
+
 def child_check(name, command, timeout, directory, success_marker=None):
     log = directory / f"{name}.log"
     env = os.environ.copy()
@@ -152,6 +203,8 @@ def main():
             args.output_dir,
             success_marker="Gradient w.r.t. joints:",
         )
+    if args.curobo:
+        checks["curobo_mesh"] = curobo_mesh_check
     if args.sim:
         checks["simulation"] = lambda: child_check(
             "simulation",

@@ -87,7 +87,7 @@ def test_invalid_action_fails_without_silent_clipping(collection, value):
 
 def test_spec_deep_immutability_and_version_validation(spec):
     with pytest.raises(TypeError):
-        spec.collection.task.parameters["settle_time"] = 1
+        spec.collection.task.parameters["hold_time"] = 1
     with pytest.raises(TypeError):
         spec.initial_state["test_state"][0] = 1
     with pytest.raises(ValueError, match="asset"):
@@ -156,17 +156,16 @@ def test_camera_rejects_invalid_optics(collection, change):
         replace(collection.deployment.cameras[0], **change)
 
 
-def test_instruction_follows_role_bindings_without_changing_scene():
-    from pathlib import Path
-
-    root = Path(__file__).resolve().parents[1] / "configs/collection"
-    red = load_collection(root / "red_to_green.yaml")
-    blue = load_collection(root / "blue_to_green.yaml")
-    yellow = load_collection(root / "red_to_yellow.yaml")
-    assert red.scene == blue.scene == yellow.scene
-    assert red.instruction == "将红色方块放入绿色容器，然后松开夹爪。"
-    assert blue.instruction == "将蓝色方块放入绿色容器，然后松开夹爪。"
-    assert yellow.instruction == "将红色方块放入黄色容器，然后松开夹爪。"
+def test_instruction_follows_role_bindings_without_changing_scene(collection):
+    objects = dict(collection.scene.objects)
+    objects["other"] = {**objects["cube"], "description": "另一根红色积木"}
+    original = replace(collection, scene=replace(collection.scene, objects=objects))
+    other = replace(
+        original, role_bindings={"target_object": "other", "container": "container"}
+    )
+    assert original.scene == other.scene
+    assert original.instruction == "将红色积木放入灰色收纳篮，然后松开夹爪。"
+    assert other.instruction == "将另一根红色积木放入灰色收纳篮，然后松开夹爪。"
     for instruction in (
         "{missing}",
         "{target_object.foo}",
@@ -174,4 +173,4 @@ def test_instruction_follows_role_bindings_without_changing_scene():
         "{target_object:10}",
     ):
         with pytest.raises(ValueError, match="placeholder"):
-            replace(red, task=replace(red.task, instruction=instruction))
+            replace(original, task=replace(original.task, instruction=instruction))

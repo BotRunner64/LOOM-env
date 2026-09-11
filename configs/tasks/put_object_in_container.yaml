@@ -1,4 +1,4 @@
-id: put_cube_in_container
+id: put_object_in_container
 instruction: 将{target_object}放入{container}，然后松开夹爪。
 roles:
   target_object: graspable_object
@@ -7,7 +7,6 @@ required_capabilities:
 - grasp
 - place
 parameters:
-  settle_time: 0.25
-  max_linear_speed: 0.02
-  max_angular_speed: 0.1
-  failure_height: 0.6
+  hold_time: 0.25
+  failure_drop: 0.15
+  containment_tolerance: 0.0005

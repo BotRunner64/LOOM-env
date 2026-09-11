@@ -9,7 +9,7 @@ import traceback
 from unittest.mock import patch
 
 from loom_env.data.episodes import EpisodeReader, EpisodeWriter, iter_episodes
-from loom_env.environments.tabletop import initial_command
+from loom_env.embodiments.commands import initial_command
 from loom_env.runtime.replay import (
     ComparingEnvironment,
     RecordedActions,
@@ -19,7 +19,7 @@ from loom_env.runtime.replay import (
 from loom_env.runtime.runner import EpisodeRunner
 from loom_env.specs.config import plain
 from loom_env.specs.episode import Action
-from loom_env.tasks.place import PlaceTask
+from loom_env.tasks import create_task
 
 
 class Hold:
@@ -50,12 +50,11 @@ def main():
         )
         report, code = {}, 1
         try:
-            from loom_env.environments.isaac_lab import TabletopEnvironment, _tree_map
-            from loom_env.experts.curobo import PandaPlanner
-            from loom_env.experts.pick_place import PickPlaceExpert
+            from loom_env.environments.isaac_lab import _tree_map
+            from loom_env.runtime.build import create_environment, create_expert
 
             spec = original.spec
-            env = TabletopEnvironment(spec.collection, args.asset_root)
+            env = create_environment(spec.collection, args.asset_root)
             command = initial_command(spec.collection.deployment)
             env.reset_episode(spec)
             perturbed = command.copy()
@@ -85,7 +84,7 @@ def main():
             comparison = ReplayComparison(original)
             replay = EpisodeRunner(
                 ComparingEnvironment(env, comparison),
-                ReplayTask(PlaceTask(spec.collection), len(original)),
+                ReplayTask(create_task(spec.collection), len(original)),
                 RecordedActions(original),
             ).run(replay_spec, args.output_dir)
             report["replay"] = {**comparison.report(), "result": plain(replay)}
@@ -104,9 +103,9 @@ def main():
                     "case": "hold_timeout",
                 },
             )
-            timeout = EpisodeRunner(env, PlaceTask(spec.collection), Hold(command)).run(
-                timeout_spec, args.output_dir
-            )
+            timeout = EpisodeRunner(
+                env, create_task(spec.collection), Hold(command)
+            ).run(timeout_spec, args.output_dir)
             report["timeout"] = {
                 "passed": timeout.outcome.code == "timeout" and timeout.steps == 10,
                 "result": plain(timeout),
@@ -129,7 +128,7 @@ def main():
                 provenance={
                     **spec.provenance,
                     "source": "verification",
-                    "case": "unsupported_cube_fall",
+                    "case": "unsupported_object_fall",
                 },
             )
             env.reset_episode(failure_spec)
@@ -137,9 +136,9 @@ def main():
                 env.scene.get_state(), lambda v: v.cpu().tolist()
             )
             failure_spec = replace(failure_spec, initial_state=state)
-            failure = EpisodeRunner(env, PlaceTask(spec.collection), Hold(command)).run(
-                failure_spec, args.output_dir
-            )
+            failure = EpisodeRunner(
+                env, create_task(spec.collection), Hold(command)
+            ).run(failure_spec, args.output_dir)
             report["physical_failure"] = {
                 "passed": failure.outcome.code == "task_failure",
                 "result": plain(failure),
@@ -170,7 +169,7 @@ def main():
             caught = False
             try:
                 with patch.object(EpisodeWriter, "_append", interrupt):
-                    EpisodeRunner(env, PlaceTask(spec.collection), Hold(command)).run(
+                    EpisodeRunner(env, create_task(spec.collection), Hold(command)).run(
                         interrupted_spec, args.output_dir
                     )
             except KeyboardInterrupt:
@@ -201,17 +200,16 @@ def main():
                     "paired_initial_state": spec.id,
                 },
             )
-            planner = PandaPlanner(swapped.collection, side)
-            expert = PickPlaceExpert(swapped.collection, planner, env.world_state)
+            expert = create_expert(swapped.collection, env, args.asset_root)
             swapped_result = EpisodeRunner(
-                env, PlaceTask(swapped.collection), expert
+                env, create_task(swapped.collection), expert
             ).run(swapped, args.output_dir)
             report["role_swap"] = {
                 "passed": swapped_result.outcome.code == "success",
                 "arm": side,
                 "result": plain(swapped_result),
             }
-            planner.planner.destroy()
+            expert.planner.planner.destroy()
             report["passed"] = all(case["passed"] for case in report.values())
             code = 0 if report["passed"] else 1
             env.close()
@@ -223,7 +221,7 @@ def main():
             with (args.output_dir / "verification.json").open("x") as stream:
                 json.dump(report, stream, indent=2, default=str)
             print("VERIFICATION " + json.dumps(report, default=str), flush=True)
-            launcher.app.close()
+            launcher.app.close(exit_code=code)
     return code
 
 

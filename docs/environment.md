@@ -69,6 +69,15 @@ pip check
 
 `.[sim]` 读取 `pyproject.toml` 中的仿真依赖；五个本地路径提供 Lab 核心、资产、PhysX、Omniverse 和可视化子包；两个额外下载源提供 CUDA 版 PyTorch 和 NVIDIA 包。pip 在同一次解析中检查这些依赖的兼容性。Lab 以 editable 方式安装，请保留 `.deps/IsaacLab`，该目录不提交到仓库。
 
+当前固定的 cuRobo 版本还需要 [小网格距离查询补丁](../patches/curobo-small-mesh-sdf.patch)。原实现把查询上限设为网格包围半径；对于小于机器人碰撞球的小物体，远处查询也可能误报碰撞。补丁保留配置的最小查询距离，并使用 Warp 的公开设备转换接口，不改资产几何或 PhysX 配置。安装后执行一次，重装 cuRobo 后重新应用：
+
+```bash
+patch -d "$(python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')" -p1 < patches/curobo-small-mesh-sdf.patch
+python scripts/check_env.py --curobo
+```
+
+`--curobo` 包含小网格的远处无碰撞、近处碰撞及梯度检查。
+
 ## 宿主机依赖
 
 运行仿真需要可供容器访问的 NVIDIA RTX GPU、图形驱动与 Vulkan ICD，以及 GLIBC >=2.35、Vulkan/OpenGL/EGL 运行库。源码获取需要 `git` 和 `git-lfs`；源码扩展编译需要 C/C++ 工具链与匹配的 CUDA Toolkit。视频导出可使用系统 FFmpeg 或安装的 `imageio-ffmpeg`。

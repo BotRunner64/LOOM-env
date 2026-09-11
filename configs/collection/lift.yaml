@@ -1,9 +1,8 @@
-task: ../tasks/put_object_in_container.yaml
+task: ../tasks/lift_object.yaml
 deployment: ../deployments/dual_panda.yaml
 scene: ../scenes/tabletop.yaml
 role_bindings:
   target_object: object
-  container: basket
 arm_roles:
   manipulator: right
 max_steps: 500

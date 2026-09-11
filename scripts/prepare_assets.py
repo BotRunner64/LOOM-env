@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare pinned robot models in the ignored cache with Isaac Lab's URDF converter."""
+"""Prepare pinned robot and scene models in the ignored asset cache."""
 
 import argparse
 from copy import deepcopy
@@ -186,16 +186,29 @@ def normalize_urdf(root, name):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("models", nargs="+", choices=[*MODELS, "openarm", "all"])
+    parser.add_argument(
+        "models", nargs="+", choices=[*MODELS, "openarm", "all", "scene"]
+    )
     parser.add_argument("--asset-root", type=Path, default=ROOT / ".cache/assets")
+    parser.add_argument(
+        "--source-root", type=Path, help="Shared sim_projects root for scene assets"
+    )
     args = parser.parse_args()
     root = args.asset_root.resolve()
     if root.is_relative_to(ROOT) and not root.is_relative_to(ROOT / ".cache/assets"):
         parser.error("Repository-local assets must be under the ignored .cache/assets/")
     if os.environ.get("OMNI_KIT_ACCEPT_EULA", "").upper() not in {"Y", "YES", "1"}:
         parser.error("Set OMNI_KIT_ACCEPT_EULA=YES after accepting NVIDIA's EULA")
+    if "scene" in args.models:
+        if args.source_root is None:
+            parser.error("scene requires --source-root pointing to sim_projects")
+        from loom_env.assets.prepare import prepare_scene_assets
+
+        prepare_scene_assets(root, args.source_root, ROOT)
     names = []
     for choice in args.models:
+        if choice == "scene":
+            continue
         if choice == "all":
             names.extend(MODELS)
         elif choice == "openarm":

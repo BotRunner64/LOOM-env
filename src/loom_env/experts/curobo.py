@@ -1,6 +1,7 @@
 """cuRobo 0.8 pose planning in the selected Panda's base frame."""
 
 from itertools import product
+from copy import copy
 from pathlib import Path
 import time
 
@@ -13,17 +14,27 @@ from curobo.config_io import load_yaml
 from curobo.content import get_robot_configs_path
 from curobo.kinematics import Kinematics, KinematicsCfg
 from curobo.motion_planner import MotionPlanner, MotionPlannerCfg
-from curobo.scene import Cuboid, Scene
+from curobo.scene import Cuboid, Mesh, Scene
 from curobo.types import GoalToolPose, JointState, Pose
 
-from loom_env.environments.tabletop import tabletop_geometry
+from loom_env.assets.catalog import asset_definition, collision_mesh
 from loom_env.runtime.runner import SourceFailure
 
 
 class PandaPlanner:
-    def __init__(self, collection, side):
-        self.collection, self.side = collection, side
-        self.arm = collection.deployment.arms[side]
+    def __init__(self, deployment, scene, side, target_object, asset_root):
+        self.deployment, self.scene, self.side = deployment, scene, side
+        self.target_object = target_object
+        self.arm = deployment.arms[side]
+        self.meshes = {}
+        for name, obj in scene.objects.items():
+            vertices, faces = collision_mesh(asset_root, obj["asset"])
+            self.meshes[name] = Mesh(
+                name=name,
+                vertices=vertices.tolist(),
+                faces=faces.tolist(),
+                pose=[0, 0, 0, 1, 0, 0, 0],
+            )
         self.base = np.asarray(self.arm.base_pose)
         self.rotation = Rotation.from_quat(self.base[3:])
         robot = load_yaml(str(Path(get_robot_configs_path()) / "franka.yml"))
@@ -32,7 +43,7 @@ class PandaPlanner:
         }
         cfg = MotionPlannerCfg.create(
             robot=robot,
-            collision_cache={"obb": 128},
+            collision_cache={"obb": 128, "mesh": 16},
             num_ik_seeds=32,
             num_trajopt_seeds=4,
             random_seed=0,
@@ -42,9 +53,7 @@ class PandaPlanner:
         )
         # Execute each 25 ms planned sample over a 50 ms control interval.
         # Time scaling slows the complete collision-checked path uniformly.
-        cfg.trajopt_solver_config.interpolation_dt = (
-            collection.deployment.control_dt / 2
-        )
+        cfg.trajopt_solver_config.interpolation_dt = deployment.control_dt / 2
         self.planner = MotionPlanner(cfg)
         # The pinned 0.8 high-level property refers to a missing solver field.
         # Instantiate its native manager against the shared kinematics params.
@@ -77,12 +86,9 @@ class PandaPlanner:
         )
 
     def update_world(self, observation, truth, *, allow_object_contact):
-        boxes = [
-            self._box(name, box["size"], np.r_[box["position"], [0, 0, 0, 1]])
-            for name, box in tabletop_geometry(self.collection).items()
-        ]
+        boxes = []
         other = "left" if self.side == "right" else "right"
-        arm = self.collection.deployment.arms[other]
+        arm = self.deployment.arms[other]
         held = self.holding_model.compute_kinematics(
             self._state(observation.values[f"robot/{other}/joint_position"])
         )
@@ -96,24 +102,28 @@ class PandaPlanner:
             boxes.append(
                 self._box(f"held_{i}", [2 * sphere[3]] * 3, np.r_[center, [0, 0, 0, 1]])
             )
-        target = self.collection.role_bindings["target_object"]
-        for name, obj in self.collection.scene.objects.items():
-            if obj["asset"] != "primitive:cube":
+        meshes = []
+        for name in self.scene.objects:
+            if name == self.target_object and (allow_object_contact or self.attached):
                 continue
-            if name == target and (allow_object_contact or self.attached):
-                continue
-            boxes.append(
-                self._box(f"object_{name}", obj["size"], truth[f"{name}/pose_world"])
-            )
-        self.planner.update_world(Scene(cuboid=boxes))
-        return len(boxes)
+            mesh = copy(self.meshes[name])
+            local = self._local_pose(truth[f"{name}/pose_world"])
+            mesh.pose = local[[0, 1, 2, 6, 3, 4, 5]].tolist()
+            meshes.append(mesh)
+        self.planner.update_world(Scene(cuboid=boxes, mesh=meshes))
+        return len(boxes) + len(meshes)
 
     def attach(self, observation, truth):
         """Planning geometry only; the simulator object remains a free rigid body."""
-        obj = self.collection.role_bindings["target_object"]
-        size = np.asarray(self.collection.scene.objects[obj]["size"])
-        centers = np.asarray(list(product((-1, 1), repeat=3))) * size / 4
-        # Each sphere covers one octant of the cube, including its corners.
+        obj = self.target_object
+        low, high = np.asarray(
+            asset_definition(self.scene.objects[obj]["asset"]).bounds
+        )
+        size = high - low
+        centers = (low + high) / 2 + np.asarray(
+            list(product((-1, 1), repeat=3))
+        ) * size / 4
+        # Each sphere covers one octant of the object envelope, including its corners.
         spheres = np.c_[centers, np.full(8, np.linalg.norm(size / 4))]
         self.attachment.update(
             torch.tensor(spheres, device="cuda:0", dtype=torch.float32),

@@ -1,4 +1,4 @@
-"""Single-table ManagerBasedEnv with an explicit LOOM Runner boundary.
+"""Asset-based ManagerBasedEnv with an explicit LOOM Runner boundary.
 
 Import only after AppLauncher. Native managers own control, observations and
 step hooks; EpisodeWriter remains the only on-disk recording implementation.
@@ -12,7 +12,7 @@ from scipy.spatial.transform import Rotation
 import torch
 
 import isaaclab.sim as sim_utils
-from isaaclab.assets import AssetBaseCfg, RigidObjectCfg
+from isaaclab.assets import AssetBaseCfg
 from isaaclab.envs import ManagerBasedEnv, ManagerBasedEnvCfg
 from isaaclab.managers import (
     ActionTerm,
@@ -25,17 +25,27 @@ from isaaclab.managers import (
 from isaaclab.managers.recorder_manager import RecorderManagerBaseCfg, DatasetExportMode
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.utils import configclass
-from isaaclab_physx.physics import PhysxCfg
 from isaaclab_physx.sensors import ContactSensorCfg
 
 from loom_env.embodiments.cameras import CameraMounts, camera_config
 from loom_env.embodiments.assets import PANDA_ASSET
 from loom_env.embodiments.isaac_lab import DualArmArticulation, articulation_config
-from loom_env.environments.tabletop import (
-    grasp_evidence,
-    initial_command,
+from loom_env.assets.catalog import (
+    asset_definition,
+    load_prepared,
+    prepared_directory,
+    sha256,
+)
+from loom_env.embodiments.commands import initial_command
+from loom_env.embodiments.contacts import opposing_contacts
+from loom_env.scenes.isaac_lab import instance_config, simulation_config
+from loom_env.scenes.workspace import (
     sample_objects,
-    tabletop_geometry,
+    dynamic_names,
+    transform,
+    workspace,
+    corners,
+    maximum_point_speed,
 )
 from loom_env.specs.config import ARMS, EpisodeSpec, plain
 from loom_env.specs.episode import Frame, Observation, Transition, observation_shapes
@@ -143,40 +153,10 @@ def policy_signal(env, key):
     )
 
 
-def tabletop_object_config(obj, prim_path, position):
-    return RigidObjectCfg(
-        prim_path=prim_path,
-        spawn=sim_utils.CuboidCfg(
-            size=tuple(obj["size"]),
-            rigid_props=sim_utils.RigidBodyPropertiesCfg(
-                solver_position_iteration_count=16,
-                solver_velocity_iteration_count=4,
-                max_depenetration_velocity=1.0,
-            ),
-            collision_props=sim_utils.CollisionPropertiesCfg(
-                contact_offset=0.002, rest_offset=0.0
-            ),
-            mass_props=sim_utils.MassPropertiesCfg(mass=0.05),
-            physics_material=sim_utils.RigidBodyMaterialCfg(
-                static_friction=1.0, dynamic_friction=1.0, restitution=0.0
-            ),
-            visual_material=sim_utils.PreviewSurfaceCfg(
-                diffuse_color=tuple(obj["color"])
-            ),
-        ),
-        init_state=RigidObjectCfg.InitialStateCfg(pos=tuple(position)),
-    )
-
-
 def environment_config(collection, asset_root):
     if any(arm.asset != PANDA_ASSET for arm in collection.deployment.arms.values()):
-        raise ValueError(
-            "The first contact-based place environment supports dual Panda"
-        )
-    if collection.task.id != "put_cube_in_container":
-        raise ValueError("Tabletop environment requires put_cube_in_container")
-    geometry = tabletop_geometry(collection)
-    candidates = sample_objects(collection, 0)
+        raise ValueError("Contact measurement currently supports dual Panda")
+    candidates = sample_objects(collection.scene, 0)
     scene = InteractiveSceneCfg(num_envs=1, env_spacing=3.0, replicate_physics=False)
     prefix = "{ENV_REGEX_NS}"
     for side in ARMS:
@@ -191,35 +171,22 @@ def environment_config(collection, asset_root):
                 ContactSensorCfg(
                     prim_path=f"{prefix}/{side}_robot/panda_{finger}finger",
                     filter_prim_paths_expr=[
-                        f"{prefix}/object_{name}" for name in candidates
+                        f"{prefix}/object_{name}"
+                        for name in dynamic_names(collection.scene)
                     ],
                     max_contact_data_count_per_prim=64,
                 ),
             )
-    for name, box in geometry.items():
-        setattr(
-            scene,
-            f"geometry_{name}",
-            AssetBaseCfg(
-                prim_path=f"{prefix}/geometry_{name}",
-                spawn=sim_utils.CuboidCfg(
-                    size=tuple(box["size"]),
-                    collision_props=sim_utils.CollisionPropertiesCfg(
-                        contact_offset=0.002, rest_offset=0.0
-                    ),
-                    visual_material=sim_utils.PreviewSurfaceCfg(
-                        diffuse_color=tuple(box["color"])
-                    ),
-                ),
-                init_state=AssetBaseCfg.InitialStateCfg(pos=tuple(box["position"])),
-            ),
-        )
     for name, candidate in candidates.items():
-        obj = collection.scene.objects[name]
         setattr(
             scene,
             f"object_{name}",
-            tabletop_object_config(obj, f"{prefix}/object_{name}", candidate),
+            instance_config(
+                collection.scene.objects[name],
+                f"{prefix}/object_{name}",
+                candidate,
+                asset_root,
+            ),
         )
     scene.light = AssetBaseCfg(
         prim_path="/World/Light", spawn=sim_utils.DomeLightCfg(intensity=600)
@@ -248,13 +215,7 @@ def environment_config(collection, asset_root):
     return ManagerBasedEnvCfg(
         scene=scene,
         decimation=collection.deployment.decimation,
-        sim=sim_utils.SimulationCfg(
-            dt=collection.deployment.physics_dt,
-            render_interval=collection.deployment.decimation,
-            device="cuda:0",
-            physics=PhysxCfg(),
-            render=sim_utils.RenderCfg(ambient_light_intensity=0.3),
-        ),
+        sim=simulation_config(collection.deployment),
         actions=PositionActionsCfg(),
         observations={"policy": observations},
         recorders=recorders,
@@ -264,19 +225,22 @@ def environment_config(collection, asset_root):
     )
 
 
-class TabletopEnvironment(ManagerBasedEnv):
+class ManipulationEnvironment(ManagerBasedEnv):
     """One physical scene, no automatic episode termination or reset."""
 
     def __init__(self, collection, asset_root=Path(".cache/assets")):
         self.collection = collection
         self.asset_root = asset_root
-        self.object_names = tuple(
-            sorted(
-                name
-                for name, obj in collection.scene.objects.items()
-                if obj["asset"] == "primitive:cube"
-            )
-        )
+        self.object_names = dynamic_names(collection.scene)
+        self.instance_poses = sample_objects(collection.scene, 0)
+        self.asset_manifests = {
+            obj["asset"]: load_prepared(asset_root, obj["asset"])
+            for obj in collection.scene.objects.values()
+        }
+        self.scene_asset_versions = {
+            key: sha256(prepared_directory(asset_root, key) / "asset.json")
+            for key in self.asset_manifests
+        }
         self.control_step = 0
         self.camera_steps, self.camera_images, self.camera_poses = {}, {}, {}
         self.camera_sync_step = None
@@ -310,7 +274,6 @@ class TabletopEnvironment(ManagerBasedEnv):
     def world_state(self):
         world = {}
         for index, name in enumerate(self.object_names):
-            obj = self.collection.scene.objects[name]
             data = self.scene[f"object_{name}"].data
             pose = data.root_pose_w.torch[0].cpu().numpy().copy()
             velocity = data.root_vel_w.torch[0].cpu().numpy().copy()
@@ -326,19 +289,13 @@ class TabletopEnvironment(ManagerBasedEnv):
                     ]
                 )
                 robot_data = self.robot.robots[side].data
-                hand = (
-                    robot_data.body_link_pose_w.torch[0, self.robot.tcp_ids[side]]
-                    .cpu()
-                    .numpy()
-                )
-                local = Rotation.from_quat(hand[3:]).inv().apply(pose[:3] - hand[:3])
                 fingers = (
                     robot_data.joint_pos.torch[0, self.robot.gripper_ids[side]]
                     .cpu()
                     .numpy()
                 )
                 contacts.append(forces)
-                grasped.append(grasp_evidence(forces, fingers, local, obj["size"]))
+                grasped.append(opposing_contacts(forces, fingers))
             world.update(
                 {
                     f"{name}/pose_world": pose,
@@ -348,10 +305,13 @@ class TabletopEnvironment(ManagerBasedEnv):
                 }
             )
         for name, obj in self.collection.scene.objects.items():
-            if obj["asset"] == "primitive:open_box":
-                world[f"{name}/region_pose_world"] = np.r_[
-                    obj["position"], [0.0, 0.0, 0.0, 1.0]
-                ]
+            if obj["static"]:
+                world[f"{name}/pose_world"] = self.instance_poses[name].copy()
+            asset = asset_definition(obj["asset"])
+            if asset.interior is not None:
+                world[f"{name}/region_pose_world"] = transform(
+                    world[f"{name}/pose_world"], [*asset.interior[0], 0, 0, 0, 1]
+                )
         world.update(
             {
                 f"cameras/{camera.name}/pose_world": self.camera_poses[camera.name]
@@ -382,14 +342,17 @@ class TabletopEnvironment(ManagerBasedEnv):
         return Transition(self.recorded_frame, self.applied_control.copy())
 
     def reset_episode(self, spec):
-        for field in ("task", "deployment", "scene", "role_bindings"):
+        for field in ("deployment", "scene"):
             if plain(getattr(spec.collection, field)) != plain(
                 getattr(self.collection, field)
             ):
                 raise ValueError(f"Episode {field} differs from the instantiated scene")
+        for asset_id, version in self.scene_asset_versions.items():
+            if spec.asset_versions[asset_id] != version:
+                raise ValueError(f"Episode asset version differs: {asset_id}")
         if set(spec.initial_state) != {"scene", "control_targets"}:
             raise ValueError(
-                "Expected a measured tabletop scene snapshot and control targets"
+                "Expected a measured scene snapshot and control targets"
             )
         self.control_step = self._sim_step_counter = 0
         self.camera_steps.clear()
@@ -419,12 +382,13 @@ class TabletopEnvironment(ManagerBasedEnv):
         self.reset(seed=seed)
         command = initial_command(self.collection.deployment)
         self.robot.reset(command)
-        candidates = sample_objects(self.collection, seed)
-        for name, candidate in candidates.items():
+        candidates = sample_objects(self.collection.scene, seed)
+        for name in self.object_names:
+            candidate = candidates[name]
             obj = self.scene[f"object_{name}"]
             obj.write_root_pose_to_sim_index(
                 root_pose=torch.tensor(
-                    np.r_[candidate, [0, 0, 0, 1]][None],
+                    candidate[None],
                     device=self.device,
                     dtype=torch.float32,
                 )
@@ -433,7 +397,7 @@ class TabletopEnvironment(ManagerBasedEnv):
                 root_velocity=torch.zeros((1, 6), device=self.device)
             )
         stable = 0
-        for _ in range(100):
+        for _ in range(round(5.0 / self.step_dt)):
             frame = self.step(command).frame
             robot_stable = all(
                 np.max(
@@ -450,24 +414,48 @@ class TabletopEnvironment(ManagerBasedEnv):
                 for side in ARMS
             )
             objects_stable = all(
-                np.linalg.norm(frame.world_state[f"{name}/velocity_world"]) < 0.01
-                for name in candidates
+                maximum_point_speed(
+                    asset_definition(self.collection.scene.objects[name]["asset"]),
+                    frame.world_state[f"{name}/pose_world"],
+                    frame.world_state[f"{name}/velocity_world"],
+                ) < 0.005
+                for name in self.object_names
             )
             stable = stable + 1 if robot_stable and objects_stable else 0
-            if stable >= 5:
+            if stable * self.step_dt >= 0.25:
                 break
         else:
-            raise RuntimeError("Candidate failed to settle within five seconds")
-        for name, candidate in candidates.items():
+            diagnostics = {
+                "objects": {
+                    name: {
+                        "pose": frame.world_state[f"{name}/pose_world"].tolist(),
+                        "velocity": frame.world_state[
+                            f"{name}/velocity_world"
+                        ].tolist(),
+                    }
+                    for name in self.object_names
+                },
+                "robot": {
+                    side: frame.observation.values[
+                        f"robot/{side}/joint_velocity"
+                    ].tolist()
+                    for side in ARMS
+                },
+            }
+            raise RuntimeError(
+                f"Candidate failed to settle within five seconds: {diagnostics}"
+            )
+        support, _ = workspace(self.collection.scene)
+        for name in self.object_names:
+            candidate = candidates[name]
             measured = frame.world_state[f"{name}/pose_world"]
+            asset = asset_definition(self.collection.scene.objects[name]["asset"])
+            bottom = (
+                Rotation.from_quat(measured[3:]).apply(corners(asset)) + measured[:3]
+            )[:, 2].min()
             if (
                 np.linalg.norm(measured[:2] - candidate[:2]) > 0.005
-                or abs(
-                    measured[2]
-                    - self.collection.scene.parameters["table_height"]
-                    - self.collection.scene.objects[name]["size"][2] / 2
-                )
-                > 0.002
+                or abs(bottom - support[2]) > 0.003
             ):
                 raise RuntimeError(
                     f"Candidate moved outside its accepted support pose: {name}"
@@ -483,8 +471,10 @@ class TabletopEnvironment(ManagerBasedEnv):
                     name: value.tolist() for name, value in candidates.items()
                 },
                 "settling_steps": self.control_step,
+                "settling_max_point_speed_m_s": 0.005,
                 "controllers": self.robot.controller_parameters,
                 "gravity_compensation": True,
+                "external_forces_every_iteration": self.cfg.sim.physics.enable_external_forces_every_iteration,
                 "camera_intrinsics": {
                     camera.name: self.scene[f"camera_{camera.name}"]
                     .data.intrinsic_matrices.torch[0]
@@ -499,8 +489,7 @@ class TabletopEnvironment(ManagerBasedEnv):
             },
             asset_versions={
                 **self.robot.asset_versions,
-                "primitive:cube": "tabletop-v2",
-                "primitive:open_box": "tabletop-v2",
+                **self.scene_asset_versions,
             },
             runtime_versions={
                 name: importlib.metadata.version(name)
@@ -520,6 +509,7 @@ class TabletopEnvironment(ManagerBasedEnv):
                 "physics_backend": "PhysX",
                 "resolved_robot_usd": self.robot.usd_paths,
                 "model_checks": self.robot.model_checks,
+                "scene_assets": self.asset_manifests,
                 **(provenance or {}),
             },
         )

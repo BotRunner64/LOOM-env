@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Collect physical Panda pick/place episodes with the shared LOOM Runner."""
+"""Collect physical manipulation episodes with the shared LOOM Runner."""
 
 import argparse
 from dataclasses import replace
@@ -18,11 +18,11 @@ def main():
     parser.add_argument(
         "--collection", type=Path, default=ROOT / "configs/collection/pick_place.yaml"
     )
-    parser.add_argument("--output-dir", type=Path, default=ROOT / "outputs/pick_place")
+    parser.add_argument("--output-dir", type=Path, default=ROOT / "outputs/manipulation")
     parser.add_argument("--asset-root", type=Path, default=ROOT / ".cache/assets")
     parser.add_argument(
         "--episode-id",
-        default="place-" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ"),
+        default="episode-" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ"),
     )
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--episodes", type=int, default=1)
@@ -42,17 +42,15 @@ def main():
         headless=True, enable_cameras=bool(collection.deployment.cameras)
     )
     code = 0
+    env = source = None
     try:
-        from loom_env.environments.isaac_lab import TabletopEnvironment
-        from loom_env.experts.curobo import PandaPlanner
-        from loom_env.experts.pick_place import PickPlaceExpert
+        from loom_env.runtime.build import create_environment, create_expert
         from loom_env.runtime.runner import EpisodeRunner
-        from loom_env.tasks.place import PlaceTask
+        from loom_env.tasks import create_task
 
-        env = TabletopEnvironment(collection, args.asset_root)
-        planner = PandaPlanner(collection, collection.arm_roles["manipulator"])
-        source = PickPlaceExpert(collection, planner, env.world_state)
-        runner = EpisodeRunner(env, PlaceTask(collection), source)
+        env = create_environment(collection, args.asset_root)
+        source = create_expert(collection, env, args.asset_root)
+        runner = EpisodeRunner(env, create_task(collection), source)
         for i in range(args.episodes):
             episode_id = (
                 args.episode_id if args.episodes == 1 else f"{args.episode_id}-{i:04d}"
@@ -60,7 +58,7 @@ def main():
             spec = env.resolve_episode(
                 episode_id,
                 args.seed + i,
-                provenance={"expert": "panda_pick_place-v1", "planner": "cuRobo"},
+                provenance={"expert": type(source).__name__, "planner": "cuRobo"},
             )
             result = runner.run(spec, args.output_dir)
             print(
@@ -69,13 +67,15 @@ def main():
             )
             if result.outcome.code != "success":
                 code = 1
-        planner.planner.destroy()
-        env.close()
     except Exception:
         traceback.print_exc()
         code = 1
     finally:
-        launcher.app.close()
+        if source is not None:
+            source.planner.planner.destroy()
+        if env is not None:
+            env.close()
+        launcher.app.close(exit_code=code)
     return code
 
 

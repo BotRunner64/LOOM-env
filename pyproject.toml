@@ -35,7 +35,7 @@ sim = [
     "isaaclab-ov==0.4.2",
     "isaaclab-visualizers==0.1.0",
     "warp-lang==1.13.0",
-    # Convert GLB robot visuals to OBJ for the URDF importer.
+    # Convert robot visuals and bake source scene collision meshes.
     "trimesh==4.11.1",
     # Additional version pin for Lab's ONNX dependency.
     "onnx==1.20.1",

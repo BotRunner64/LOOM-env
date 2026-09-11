@@ -29,6 +29,11 @@ def main():
     try:
         if args.command == "config":
             spec = load_collection(args.path)
+            from loom_env.tasks import create_task
+            from loom_env.scenes.workspace import sample_objects
+
+            create_task(spec)
+            sample_objects(spec.scene, 0)
             result = {
                 "task": spec.task.id,
                 "instruction": spec.instruction,

@@ -1,40 +1,59 @@
-id: tabletop_cube_container
+id: tabletop_objects
 objects:
-  cube:
-    asset: primitive:cube
+  table:
+    asset: maniskill:table
+    category: workspace
+    description: 木质餐桌
+    static: true
+    pose:
+    - 0
+    - 0
+    - 0
+    - 0
+    - 0
+    - 0
+    - 1
+  object:
+    asset: robodojo:brick
     category: graspable_object
-    description: 红色方块
-    size:
-    - 0.04
-    - 0.04
-    - 0.04
-    color:
-    - 0.92
-    - 0.16
-    - 0.1
-    position_min:
-    - 0.38
-    - -0.12
-    - 0.775
-    position_max:
-    - 0.43
+    description: 红色积木
+    static: false
+    pose:
     - -0.05
-    - 0.775
-  container:
-    asset: primitive:open_box
+    - -0.1
+    - 0.0172
+    - 0
+    - 0
+    - 0
+    - 1
+    position_min:
+    - -0.07
+    - -0.12
+    position_max:
+    - -0.02
+    - -0.05
+  basket:
+    asset: robodojo:basket
     category: receptacle
-    description: 绿色容器
-    size:
-    - 0.14
-    - 0.14
-    - 0.1
-    color:
-    - 0.16
-    - 0.4
-    - 0.3
-    position:
-    - 0.58
-    - 0.08
-    - 0.81
+    description: 灰色收纳篮
+    static: false
+    pose:
+    - 0.13
+    - 0.12
+    - 0.03857
+    - 0
+    - 0
+    - 0
+    - 1
 parameters:
-  table_height: 0.75
+  workspace_pose:
+  - 0.45
+  - 0
+  - 0.75
+  - 0
+  - 0
+  - 0
+  - 1
+  workspace_size:
+  - 0.96
+  - 1.9

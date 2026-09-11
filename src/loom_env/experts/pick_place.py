@@ -2,24 +2,16 @@
 
 import numpy as np
 
-from loom_env.environments.tabletop import initial_command
+from loom_env.embodiments.commands import initial_command
+from loom_env.assets.catalog import asset_definition
+from loom_env.scenes.workspace import transform, workspace
 from loom_env.runtime.runner import SourceFailure
 from loom_env.specs.config import ARMS
 from loom_env.specs.episode import Action, Event
 
 
-class PickPlaceExpert:
-    STAGES = (
-        "approach",
-        "descend",
-        "close",
-        "lift",
-        "transfer",
-        "lower",
-        "release",
-        "retreat",
-        "wait",
-    )
+class LiftExpert:
+    STAGES = ("approach", "descend", "close", "lift", "wait")
     # Official Panda hand frame -> grasp center along the local +Z axis.
     HAND_TO_GRASP = 0.1034
 
@@ -34,7 +26,10 @@ class PickPlaceExpert:
         self.arm_slice = collection.deployment.action_slices[f"{self.side}/arm"]
         self.grip_slice = collection.deployment.action_slices[f"{self.side}/gripper"]
         self.obj = collection.role_bindings["target_object"]
-        self.receptacle = collection.role_bindings["container"]
+        self.asset = asset_definition(collection.scene.objects[self.obj]["asset"])
+        if self.asset.grasp is None:
+            raise ValueError("Expert requires a reviewed grasp annotation")
+        self.support, _ = workspace(collection.scene)
         self.dt = collection.deployment.control_dt
 
     def reset(self, episode_input):
@@ -51,29 +46,15 @@ class PickPlaceExpert:
         return self.STAGES[self.stage_index]
 
     def _goal(self, truth, observation):
-        cube = truth[f"{self.obj}/pose_world"][:3]
-        region = truth[f"{self.receptacle}/region_pose_world"][:3]
-        hand = cube + [0, 0, self.HAND_TO_GRASP]
+        grasp = transform(
+            truth[f"{self.obj}/pose_world"], [*self.asset.grasp, 0, 0, 0, 1]
+        )
+        hand = grasp[:3] + [0, 0, self.HAND_TO_GRASP]
         if self.stage == "approach":
             hand[2] += 0.12
         elif self.stage == "lift":
-            hand[2] = (
-                self.collection.scene.parameters["table_height"]
-                + 0.22
-                + self.HAND_TO_GRASP
-            )
-        elif self.stage in {"transfer", "lower"}:
-            hand = region.copy()
-            hand[2] += (
-                self.collection.scene.objects[self.receptacle]["size"][2] / 2
-                + self.collection.scene.objects[self.obj]["size"][2] / 2
-                + self.HAND_TO_GRASP
-            )
-            hand[2] += 0.10 if self.stage == "transfer" else 0.025
-        elif self.stage == "retreat":
-            hand = observation.values[f"robot/{self.side}/tcp_pose_world"][:3].copy()
-            hand[2] += 0.12
-        return np.r_[hand, [1.0, 0.0, 0.0, 0.0]]  # XYZW, palm points down
+            hand[2] = self.support[2] + 0.18 + self.asset.grasp[2] + self.HAND_TO_GRASP
+        return np.r_[hand, [1.0, 0.0, 0.0, 0.0]]
 
     def _advance(self, events):
         events.append(
@@ -119,12 +100,11 @@ class PickPlaceExpert:
                 self.started = True
                 if self.stage == "transfer":
                     if (
-                        truth[f"{self.obj}/pose_world"][2]
-                        < self.collection.scene.parameters["table_height"] + 0.12
+                        truth[f"{self.obj}/pose_world"][2] < self.support[2] + 0.10
                         or not grip
                     ):
                         raise SourceFailure(
-                            "Cube was not physically lifted", kind="skill"
+                            "Object was not physically lifted", kind="skill"
                         )
                     self.planner.attach(observation, truth)
                 if self.stage == "release":
@@ -170,10 +150,61 @@ class PickPlaceExpert:
                         f"{self.stage} tracking did not settle", kind="skill"
                     )
             break
-        if self.stage in {"lift", "transfer", "lower"}:
+        if self.stage in {"lift", "transfer", "lower"} or (
+            self.stage == "wait" and "release" not in self.STAGES
+        ):
             self.lost_contact = 0 if grip else self.lost_contact + 1
             if self.lost_contact >= 5:
-                raise SourceFailure("Cube lost opposing finger contacts", kind="skill")
+                raise SourceFailure(
+                    "Object lost opposing finger contacts", kind="skill"
+                )
         self.stage_steps += 1
         self.step += 1
         return Action(self.command.copy(), tuple(events))
+
+
+class PickPlaceExpert(LiftExpert):
+    STAGES = (
+        "approach",
+        "descend",
+        "close",
+        "lift",
+        "transfer",
+        "lower",
+        "release",
+        "retreat",
+        "wait",
+    )
+
+    def __init__(self, collection, planner, world_state):
+        super().__init__(collection, planner, world_state)
+        self.receptacle = collection.role_bindings["container"]
+        self.container = asset_definition(
+            collection.scene.objects[self.receptacle]["asset"]
+        )
+        if self.container.interior is None:
+            raise ValueError("Expert requires a reviewed container interior")
+
+    def _goal(self, truth, observation):
+        if self.stage in {"transfer", "lower"}:
+            region = truth[f"{self.receptacle}/region_pose_world"]
+            # Place above the opening; release after physical transfer and tracking.
+            local = [
+                0,
+                0,
+                self.container.interior[1][2] / 2 - self.asset.bounds[0][2] + 0.015,
+                0,
+                0,
+                0,
+                1,
+            ]
+            hand = transform(region, local)[:3]
+            hand[2] += self.asset.grasp[2] + self.HAND_TO_GRASP
+            if self.stage == "transfer":
+                hand[2] += 0.10
+            return np.r_[hand, [1.0, 0.0, 0.0, 0.0]]
+        if self.stage == "retreat":
+            hand = observation.values[f"robot/{self.side}/tcp_pose_world"][:3].copy()
+            hand[2] += 0.12
+            return np.r_[hand, [1.0, 0.0, 0.0, 0.0]]
+        return super()._goal(truth, observation)

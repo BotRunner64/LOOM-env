@@ -1,0 +1,10 @@
+id: lift_object
+instruction: 抓起{target_object}并保持在桌面上方。
+roles:
+  target_object: graspable_object
+required_capabilities:
+- grasp
+parameters:
+  hold_time: 0.25
+  failure_drop: 0.15
+  clearance: 0.1

@@ -2,20 +2,19 @@
 
 基于 Isaac Lab 的机器人操作仿真与数据框架，面向 context-conditioned VLA 的轨迹生成、上下文构造和对照评测。
 
-本体范围：**双臂，每臂 6 或 7 自由度，夹爪单独描述**。
+本体范围：双臂，每臂 6 或 7 自由度，夹爪单独描述。技术路线为 Isaac Lab → Isaac Sim → PhysX；专家通过有物理反馈的状态机调用 cuRobo。
 
-技术路线：**Isaac Lab → Isaac Sim → PhysX**。专家轨迹采用 **任务状态机 + cuRobo 运动规划 + 仿真执行验证**。
+任务、场景、部署分别配置，采集、重放和运动预览共用真实资产定义。首批场景使用 ManiSkill 木桌、RoboDojo 积木和收纳篮；提供抓起物体、放入容器两个任务。资产来源、固定版本、碰撞表示和功能标注集中维护，下载与转换产物放在 `.cache/assets/` 或共享目录。任务不依赖具体对象名称，环境不选择任务或专家，统一 Runner 负责执行与记录。
 
-已实现双 Panda 的抓取放置闭环：`ManagerBasedEnv` 桌面场景、cuRobo 专家、真实接触反馈、统一 Runner、Episode 记录与物理动作重放。默认用一臂操作、另一臂保持，支持交换操作角色。部署统一配置前视、左腕、右腕三路 RGB，相机挂接与记录共用于采集和运动诊断。Piper、X5、UR5＋WSG、xArm6＋Robotiq、OpenArm 和 YAM 目前支持双臂运动、FK 与夹爪诊断；抓取专家尚未扩展到这些本体。
+双 Panda 接入接触测量与任务专家。Piper、X5、UR5＋WSG、xArm6＋Robotiq、OpenArm、YAM 保留双臂运动、FK 和夹爪诊断接口，尚未接入抓取专家。当前物理验收范围见[实现说明](docs/implementation.md)。
 
-Panda 桌面场景支持多个彩色方块和多个容器：同一抓取放置任务通过目标绑定生成具体指令，提供红块→绿盒、蓝块→绿盒、红块→黄盒以及交换位置的场景配置。尺寸、颜色、采样范围和容器位置由 scene 定义；正式采集、运动预览和规划共用几何。此阶段扩展的是同一技能族的目标选择，尚未实现多物体连续整理。8 段抓取验收、基线与双物体重放均通过，详见[验收记录](docs/implementation.md#本轮实测2026-09-10)。
+- [当前实现与运行方式](docs/implementation.md)：资产准备、采集、重放和验证结果。
+- [场景资产与扩展边界](docs/scene-assets.md)：来源筛选、质量检查、功能标注和扩展步骤。
+- [本体支持与资产准备](docs/embodiments.md)：七类本体的来源、接口与验证范围。
+- [架构设计](docs/architecture.md)：配置组合、Runner、Episode 协议与 Context 实验规划。
+- [环境安装](docs/environment.md)：固定依赖与 GPU／仿真环境。
 
-- [本体支持与资产准备](docs/embodiments.md)：七类本体的资产来源、准备命令、统一接口和验证范围。
-- [当前实现与运行方式](docs/implementation.md)：采集与重放命令、数据格式和验证范围。
-- [架构设计与实现计划](docs/architecture.md)：模块边界、核心数据协议、cuRobo 专家生成、状态恢复、Context 实验和分阶段验收。
-- [环境安装与验证](docs/environment.md)：Conda 环境、pip 安装步骤和 GPU／仿真检查。
-
-依赖统一在 [pyproject.toml](pyproject.toml) 声明：核心依赖、`sim` 可选依赖和 `dev` 开发依赖组。Conda 提供 Python 环境。
+依赖统一在 `pyproject.toml` 声明：
 
 ```bash
 conda create -n loom-env python=3.12 'pip>=25.1'
@@ -23,14 +22,13 @@ conda activate loom-env
 pip install -e . --group dev
 ```
 
-以上安装基础开发依赖。完整仿真还需准备带补丁的 Isaac Lab 源码，再用 pip 安装 `sim` 可选依赖，见[完整仿真安装步骤](docs/environment.md#完整仿真)。
-
-检查示例配置和基础链路（不启动仿真）：
+基础配置与数据测试不需要启动仿真，也不需要下载场景资产：
 
 ```bash
 python scripts/inspect_data.py config configs/collection/pick_place.yaml
+python scripts/inspect_data.py config configs/collection/lift.yaml
 python -m pytest -q
 ruff check .
 ```
 
-默认 collection 使用双 Panda，运动预览通过 `--deployment configs/deployments/dual_x5.yaml` 等部署文件切换本体。配置按任务、部署、场景分别维护，collection 用相对路径引用它们。大资产及转换产物放在已忽略的 `.cache/assets/` 或仓库外的共享目录。
+运行仿真需完成[完整环境安装](docs/environment.md#完整仿真)和[资产准备](docs/implementation.md#资产准备)。

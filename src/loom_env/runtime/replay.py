@@ -63,7 +63,7 @@ class ReplayComparison:
                 ).magnitude()
             )
         for name, obj in self.episode.spec.collection.scene.objects.items():
-            if obj["asset"] != "primitive:cube":
+            if obj["static"]:
                 continue
             actual, desired = (
                 frame.world_state[f"{name}/pose_world"],
@@ -94,7 +94,7 @@ class ReplayComparison:
                 **{
                     f"{name}_rad": 0.1
                     for name, obj in self.episode.spec.collection.scene.objects.items()
-                    if obj["asset"] == "primitive:cube"
+                    if not obj["static"]
                 },
             }
         )
