@@ -1,143 +1,111 @@
 # 开发与仿真环境
 
-环境名：`loom-env`。目标平台：Linux x86_64、Python 3.12、NVIDIA RTX GPU。采用 **Isaac Sim 6.0.1 + Isaac Lab 3.0 Beta 2 Patch 1**，物理后端为 PhysX，图像渲染使用 Isaac RTX。
+项目要求 **Isaac Sim >=6**，不限制小版本；Isaac Lab 按上游兼容关系选择。目标运行平台是 Linux x86_64、NVIDIA RTX GPU，物理后端为 PhysX，图像渲染使用 Isaac RTX。
 
-## 固定版本
-
-| 组件 | 版本 | 说明 |
-| --- | --- | --- |
-| Python | 3.12 | Isaac Sim 6.0.1 的 Python ABI |
-| Isaac Sim | 6.0.1.0，`all,extscache` | 包含运行扩展和扩展缓存 |
-| Isaac Lab | `v3.0.0-beta2.patch1` | 提交 `ffff603eafc6b74264a5261cc0183d6a65390d78`，含一处下述兼容补丁 |
-| PyTorch / torchvision / torchaudio | 2.11.0 / 0.26.0 / 2.11.0，均为 `+cu128` | 遵循发布的 `isaacsim-core` wheel 精确依赖 |
-| cuRobo | v0.8.0 | 提交 `4ea77366ca48ee453e7df139e39fa6532af49f3b`，v2 API、`cu12` 依赖 |
-| NumPy / SciPy | 2.3.1 / 1.17.0 | Isaac Sim 6.0.1 的精确依赖 |
-| Warp | 1.13.0 | Isaac Lab 所选标签的精确依赖 |
-
-按用户选择，优先使用 Isaac Sim 6.0.1。与其配套的 Lab 标签仍标注 Beta；截至 2026-09-08，Lab 2.3.2.post1 稳定包配套的是 Sim 5.1 / Python 3.11。本环境固定上述 Beta 发布标签，不跟随开发分支滚动更新。Lab 源码中各子包有独立版本号，`pip show isaaclab` 显示的核心包版本为 `6.1.14`，不等于仓库发布标签。
-
-版本依据：[Sim 6.0.1 安装说明](https://docs.isaacsim.omniverse.nvidia.com/6.0.1/installation/install_python.html)、[Lab 配套发布说明](https://github.com/isaac-sim/IsaacLab/releases/tag/v3.0.0-beta2.patch1)、[Sim 核心包依赖元数据](https://pypi.org/pypi/isaacsim-core/6.0.1.0/json)、[cuRobo v0.8.0](https://github.com/NVlabs/curobo/releases/tag/v0.8.0)。
+项目直接依赖只在 `pyproject.toml` 中声明。普通库、PyTorch、Warp 不重复固定精确版本，由 Sim / Lab 的依赖关系决定。当前使用 Python 3.12 创建仿真环境；项目自身只要求 Python >=3.12，Sim 的 wheel 仍有自己的 Python ABI 限制。
 
 ## 创建环境
 
-在项目根目录执行；已有环境时只需激活：
+从仓库根目录执行。Conda 只提供 Python，依赖使用 pip 安装：
 
 ```bash
 conda create -n loom-env python=3.12 'pip>=25.1'
 conda activate loom-env
 ```
 
-Conda 提供 Python，项目依赖统一由 `pyproject.toml` 声明，使用 pip 安装。pip 会自动准备隔离的构建环境。
+已有同名环境时先检查其安装来源。旧环境曾使用 `.deps/IsaacLab` 的五个 editable 子包和手动补丁；验证新安装方案应创建独立环境，避免这些旧包掩盖缺失依赖或覆盖官方 wheel 的模块。
 
 ## 安装依赖
 
 ### 基础开发
 
-只做数据处理或基础模块开发时：
+数据处理、配置和非仿真模块开发只需：
 
 ```bash
 pip install -e . --group dev
 ```
 
-`-e .` 安装当前项目，源码修改直接生效；`--group dev` 安装 pytest 和 Ruff，不需要开发工具时可省略。此命令不安装仿真依赖，`import loom_env` 不启动仿真。
+`-e .` 使源码修改直接生效；`--group dev` 安装 pytest 和 Ruff，不需要开发工具时可省略。此命令不安装仿真依赖。
 
 ### 完整仿真
 
-先下载指定版本的 Isaac Lab 并应用兼容补丁。已有该版本源码且已应用补丁时，跳过这两条命令：
-
-```bash
-git clone --depth 1 --branch v3.0.0-beta2.patch1 https://github.com/isaac-sim/IsaacLab.git .deps/IsaacLab
-git -C .deps/IsaacLab apply ../../patches/isaaclab-sim601-coverage.patch
-```
-
-补丁解决所选版本组合的依赖冲突：Lab 要求 `coverage==7.6.1`，Sim 要求 `coverage==7.4.4`。它将 Lab 的约束放宽为 `>=7.4.4,<8`，由 Sim 固定最终版本，不改仿真逻辑。升级 Lab 时需重新检查是否仍需要该补丁。
-
-然后直接安装项目、仿真依赖和开发工具，无需先安装上节的基础依赖：
-
 ```bash
 pip install -e '.[sim]' --group dev \
-    -e .deps/IsaacLab/source/isaaclab \
-    -e .deps/IsaacLab/source/isaaclab_assets \
-    -e .deps/IsaacLab/source/isaaclab_physx \
-    -e .deps/IsaacLab/source/isaaclab_ov \
-    -e .deps/IsaacLab/source/isaaclab_visualizers \
     --index-url https://pypi.org/simple \
-    --extra-index-url https://download.pytorch.org/whl/cu128 \
-    --extra-index-url https://pypi.nvidia.com
+    --extra-index-url https://pypi.nvidia.com \
+    --extra-index-url https://download.pytorch.org/whl/cu128
 pip check
 ```
 
-`.[sim]` 读取 `pyproject.toml` 中的仿真依赖；五个本地路径提供 Lab 核心、资产、PhysX、Omniverse 和可视化子包；两个额外下载源提供 CUDA 版 PyTorch 和 NVIDIA 包。pip 在同一次解析中检查这些依赖的兼容性。Lab 以 editable 方式安装，请保留 `.deps/IsaacLab`，该目录不提交到仓库。
+[NVIDIA 源](https://pypi.nvidia.com/isaaclab/)提供官方 Isaac Lab 统一 wheel，已包含资产、PhysX、Omniverse 和可视化模块，无需克隆 Lab、安装五个源码子包或修改第三方源码。`isaaclab[isaacsim]>=3.0.0b2` 允许所需 API 系列的 Beta wheel，并由其 `isaacsim` extra 选择配套 Sim；项目额外表达的 Sim 要求只有 `>=6`。这不保证任意 Lab 与任意 Sim 都能混用。
 
-当前固定的 cuRobo 版本还需要 [小网格距离查询补丁](../patches/curobo-small-mesh-sdf.patch)。原实现把查询上限设为网格包围半径；对于小于机器人碰撞球的小物体，远处查询也可能误报碰撞。补丁保留配置的最小查询距离，并使用 Warp 的公开设备转换接口，不改资产几何或 PhysX 配置。安装后执行一次，重装 cuRobo 后重新应用：
+PyTorch 下载源选择当前 Linux x86_64 仿真组合使用的 CUDA 12.8 构建；Torch 的具体版本由上游决定。若以后切换上游组合，应按其平台要求调整下载源，而不是在项目中再维护一套版本表。
+
+cuRobo 从 `pyproject.toml` 指定的上游提交安装。保留这一源码提交是因为已发布的 v0.8.0 缺少小网格碰撞查询修复；该提交包含上游修复，不再应用本地补丁。后续有包含修复的正式发行版时可切换到发行包。
+
+## 运行与验证
+
+宿主机需要可供容器访问的 NVIDIA RTX GPU、图形驱动和 Vulkan ICD，以及 GLIBC >=2.35、Vulkan/OpenGL/EGL 运行库。Git 用于获取 cuRobo；资产获取和源码扩展可能还需要 git-lfs、C/C++ 工具链及匹配的 CUDA Toolkit。视频导出使用 `imageio-ffmpeg`。
+
+从仓库根目录、激活环境后执行：
 
 ```bash
-patch -d "$(python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')" -p1 < patches/curobo-small-mesh-sdf.patch
 python scripts/check_env.py --curobo
 ```
 
-`--curobo` 包含小网格的远处无碰撞、近处碰撞及梯度检查。
+检查项目依赖范围、`pip check`、数据读写、CUDA 矩阵运算、cuRobo 正向运动学及梯度，以及小网格的远处无碰撞和近处碰撞。结果写入 `.cache/checks/report.json`，子进程日志在同目录。版本检查通过不能替代仿真和实际任务验收。
 
-## 宿主机依赖
-
-运行仿真需要可供容器访问的 NVIDIA RTX GPU、图形驱动与 Vulkan ICD，以及 GLIBC >=2.35、Vulkan/OpenGL/EGL 运行库。源码获取需要 `git` 和 `git-lfs`；源码扩展编译需要 C/C++ 工具链与匹配的 CUDA Toolkit。视频导出可使用系统 FFmpeg 或安装的 `imageio-ffmpeg`。
-
-当前节点为 RTX 4090、驱动 595.71.05，系统 CUDA Toolkit 12.8，已有编译器、FFmpeg 和 NVIDIA Vulkan ICD。`nvidia-smi` 顶部 CUDA 13.2 表示驱动支持上限；本环境 PyTorch 使用 CUDA 12.8。cuRobo 使用 `cuda.core` 运行时编译路径。
-
-## 分项验证
-
-```bash
-conda activate loom-env
-python scripts/check_env.py
-python scripts/check_env.py --curobo
-```
-
-默认检查依赖一致性、数据读写和 CUDA 矩阵运算；`--curobo` 额外运行官方单次／批量正向运动学与梯度示例。结果及日志写入 `.cache/checks/`，成功的仿真检查会额外保存 `simulation-rgb.png`。
-
-使用 Isaac Sim 前需接受 [NVIDIA Omniverse EULA](https://docs.omniverse.nvidia.com/platform/latest/common/NVIDIA_Omniverse_License_Agreement.html)。同意后执行：
+使用 Isaac Sim 前需接受 [NVIDIA Omniverse EULA](https://docs.omniverse.nvidia.com/platform/latest/common/NVIDIA_Omniverse_License_Agreement.html)。同意后：
 
 ```bash
 export OMNI_KIT_ACCEPT_EULA=YES
-# 仅以 root 运行的容器需要此选项。
+# 仅以 root 运行的容器需要。
 export OMNI_KIT_ALLOW_ROOT=1
 python scripts/check_env.py --sim
 ```
 
-`--sim` 在独立子进程中启动 Lab，创建本地几何体，执行 GPU PhysX 步进并读取 64×64 RGB 相机。成功条件包含方块落地高度和有效图像，无需下载机器人资产。headless 渲染仍依赖 GPU 图形驱动。该检查不代表机器人任务、完整轨迹采集或状态恢复已通过验收。
+`--sim` 创建本地几何体，执行 GPU PhysX 步进，检查方块落地高度及 64×64 RGB 相机输出；无需机器人资产。成功时保存 `.cache/checks/simulation-rgb.png`。headless 渲染仍依赖 GPU 图形驱动。实际任务的资产准备、采集和重放见[运行指南](implementation.md)。
 
-## 本机安装与验证记录
+## 当前节点与排查
 
-验证日期：2026-09-08。环境路径：
-
-```text
-/inspire/hdd/global_user/czxs253130598/cache/conda/envs/loom-env
-```
-
-实装 Python 3.12.14、Isaac Sim 6.0.1.0、Lab 标签 `v3.0.0-beta2.patch1`、PyTorch 2.11.0+cu128、cuRobo 0.8.0、Warp 1.13.0、cuda-core 1.2.0。Lab 核心／PhysX／Omniverse／资产／可视化子包版本分别为 6.1.14／1.1.3／0.4.2／0.3.4／0.1.0。
-
-| 检查 | 实际结果 |
-| --- | --- |
-| 依赖一致性 | `pip check` 通过，无冲突 |
-| 数据读写 | NumPy、YAML、HDF5、OpenCV、PNG 写入通过 |
-| CUDA | RTX 4090 上矩阵运算与 CPU 参考值一致 |
-| cuRobo | 单次和 1000 组批量 FK、反向传播运行通过，输出及梯度有限 |
-| PhysX | GPU 上执行 120 步，方块从 0.5 m 下落后中心高度为 0.0500 m |
-| RTX 相机 | 得到 64×64×3 的有效 RGB 图像，已保存并查看 |
-| 脚本检查 | Ruff、Python 编译检查、Bash 语法检查通过 |
-
-Sim 验证在当前 595.71.05 驱动上通过。首次启动包含 RTX 着色器编译，仿真检查共耗时约 217 秒。实际运行命令如下；其中 Vulkan 路径用于本节点选择 NVIDIA ICD：
+当前节点使用 RTX 4090。若 Vulkan 未选择 NVIDIA ICD，在运行仿真前设置本节点路径：
 
 ```bash
-OMNI_KIT_ACCEPT_EULA=YES OMNI_KIT_ALLOW_ROOT=1 \
-VK_DRIVER_FILES=/etc/vulkan/icd.d/nvidia_icd.json \
-VK_ICD_FILENAMES=/etc/vulkan/icd.d/nvidia_icd.json \
-python scripts/check_env.py --curobo --sim
+export VK_DRIVER_FILES=/etc/vulkan/icd.d/nvidia_icd.json
+export VK_ICD_FILENAMES=/etc/vulkan/icd.d/nvidia_icd.json
 ```
 
-本机验证报告位于 `.cache/checks/report.json`，日志为 `pip-check.log`、`curobo.log`、`simulation.log`，图像为 `simulation-rgb.png`。这些运行产物不提交到仓库；依赖版本和验证步骤已保存在上述配置与文档中。
+该路径属于宿主机配置，不是所有机器的通用要求。`nvidia-smi` 顶部的 CUDA 版本是驱动支持上限；实际 PyTorch CUDA 构建可用 `python -c 'import torch; print(torch.version.cuda)'` 查看。
 
-### 直接 pip 安装验证
+- 安装找不到 Lab Beta wheel：检查 NVIDIA 下载源是否可访问；仅使用 PyPI 可能得到旧版 Lab。
+- 依赖冲突：先运行 `pip check`，检查是否混入旧 editable 子包；不要用 `--no-deps` 或修改第三方源码绕过正式安装的依赖解析。
+- cuRobo 小网格检查失败：核对是否安装了项目声明的上游提交，不能仅看 `0.8.0` 版本前缀。
+- 仿真启动失败：查看 `simulation.log`，检查 GPU、Vulkan ICD 和 EULA 设置；首次 RTX 着色器编译可能较慢。
 
-2026-09-08，在现有环境中对完整仿真命令执行 `pip install --dry-run`，隔离构建的元数据准备与依赖解析均通过；计划仅重新安装本项目和五个 Lab editable 包，无依赖版本切换。验证进程设置 `PIP_CONFIG_FILE=/dev/null`，排除本机旧 pip 索引配置。
+## 验证记录
 
-现有环境的 `pip check`、数据读写、CUDA 和 cuRobo 检查通过，Ruff 与文档命令语法检查通过。安装解析日志和报告位于 `.cache/setup/direct-pip*`，运行报告位于 `.cache/checks/direct-pip/report.json`。
+2026-09-13：移除项目对普通依赖的精确版本锁定，并用 NVIDIA 官方 Lab wheel 和包含碰撞修复的上游 cuRobo 验证无补丁安装。验证产物位于 `.cache/setup/no-patches/`，不提交 Git。
+
+验证使用 `.cache/setup/no-patches/wheel-venv`，复用原环境的 Sim / GPU 运行库，独立安装官方 Lab wheel 和原版 cuRobo；已核对所有 Lab 子模块均来自 wheel，未加载旧 editable 源码。原 Conda 环境未迁移，此次也不等同于从空机器完成全部下载的验证。
+
+实际组合为 Sim 6.0.1.0、Lab 3.0.0b2.post1、PyTorch 2.11.0+cu128、cuRobo 0.8.0.post1.dev43。它们是本次验证记录，不是项目新增的精确版本约束。
+
+- 标准完整 pip 安装成功，报告：`install-plan.json`，日志：`full-install.log`。
+- 依赖范围、`pip check`、数据读写、CUDA、cuRobo 正向运动学和梯度全部通过，报告：`final-checks/report.json`。
+- 小网格远处碰撞代价为 0，近处为约 0.0075，梯度有限。
+- GPU PhysX 方块落地中心高度为 0.0500 m，RTX 输出有效的 64×64 RGB；图像：`wheel-sim/simulation-rgb.png`，日志：`wheel-sim.log`。
+- 148 项项目测试通过，Ruff 和文档命令语法检查通过。
+
+默认 Panda 抓放（`configs/collection/pick_place.yaml`、seed 0）在原环境和无补丁环境中均执行 500 步后超时，物体落在篮子外；无补丁轨迹的数据结构检查通过。该案例未通过任务验收，不能把环境检查通过解释为抓放成功。两次物体位置轨迹最大分量差约 0.053 m，单次对照也不能证明新旧环境物理效果等价。对照报告为 `task-comparison.json`，运行日志为 `baseline.log` 和 `collection.log`，最终图像为 `panda-final.png`。
+
+复现本次无补丁抓放检查（仓库根目录，先设置上文 EULA / Vulkan 变量）：
+
+```bash
+.cache/setup/no-patches/wheel-venv/bin/python scripts/collect.py \
+    --collection configs/collection/pick_place.yaml \
+    --output-dir outputs/environment-validation --episode-id panda-no-patches --seed 0
+```
+
+该命令使用本机保留的验证环境；新机器完成上文正式安装后使用 `python`。重复运行时更换 episode ID 或输出目录。成功与否以 `RESULT` 的 `outcome` 和实际轨迹为准。
+
+历史上 2026-09-08 的 Sim 6.0.1 / Lab 源码标签组合通过了 GPU PhysX 和 RTX 相机检查，但带有本地补丁；这份历史结果不替代当前无补丁组合的验证。

@@ -41,9 +41,8 @@ def versions_check(packages, requirements, requires_python):
 
 
 def data_check():
-    import cv2
     import h5py
-    import imageio
+    import imageio.v2 as imageio
     import numpy as np
     import yaml
 
@@ -56,9 +55,9 @@ def data_check():
             np.testing.assert_array_equal(stream["observations"][:], expected)
         assert yaml.safe_load(yaml.safe_dump({"steps": 3})) == {"steps": 3}
         frame = np.zeros((8, 8, 3), dtype=np.uint8)
-        assert cv2.cvtColor(frame, cv2.COLOR_RGB2BGR).shape == frame.shape
         imageio.imwrite(Path(directory) / "frame.png", frame)
-    return "NumPy, YAML, HDF5, OpenCV and image I/O passed"
+        np.testing.assert_array_equal(imageio.imread(Path(directory) / "frame.png"), frame)
+    return "NumPy, YAML, HDF5 and image I/O passed"
 
 
 def cuda_check():
@@ -79,10 +78,10 @@ def curobo_mesh_check():
     import torch
     import trimesh
     from curobo.scene import Mesh, Scene
-    from curobo._src.geom.collision import (
+    from curobo._src.geom.collision.buffer_collision import CollisionBuffer
+    from curobo._src.geom.collision.collision_scene import (
         SceneCollision,
         SceneCollisionCfg,
-        CollisionBuffer,
     )
     from curobo._src.types.device_cfg import DeviceCfg
 
@@ -116,7 +115,8 @@ def curobo_mesh_check():
     far, contact = cost.detach().cpu().flatten().tolist()
     if abs(far) > 1e-7 or contact <= 0:
         raise RuntimeError(
-            "Small-mesh collision query failed; apply patches/curobo-small-mesh-sdf.patch"
+            "Small-mesh collision query failed; reinstall the cuRobo source "
+            "declared in pyproject.toml"
         )
     cost.sum().backward()
     if not torch.isfinite(query.grad).all():
