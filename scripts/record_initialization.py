@@ -69,9 +69,9 @@ def main():
         deployment=replace(deployment, cameras=cameras),
         scene=load_scene(args.scene),
     )
-    from isaaclab.app import AppLauncher
+    from loom_env.runtime.app import launch_app
 
-    launcher = AppLauncher(headless=True, enable_cameras=True)
+    launcher = launch_app(headless=True, enable_cameras=True)
     env = None
     try:
         import torch

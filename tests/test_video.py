@@ -89,15 +89,14 @@ def test_collection_continues_after_video_failure(
     from types import SimpleNamespace
 
     import loom_env.data.video as video
+    import loom_env.runtime.app as app_runtime
     import loom_env.runtime.build as build
     import loom_env.runtime.runner as runner
 
     exits = []
     app = SimpleNamespace(close=lambda **kwargs: exits.append(kwargs["exit_code"]))
-    monkeypatch.setitem(
-        sys.modules,
-        "isaaclab.app",
-        SimpleNamespace(AppLauncher=lambda **kwargs: SimpleNamespace(app=app)),
+    monkeypatch.setattr(
+        app_runtime, "launch_app", lambda **kwargs: SimpleNamespace(app=app)
     )
     env = SimpleNamespace(
         resolve_episode=lambda episode_id, seed, **kwargs: replace(

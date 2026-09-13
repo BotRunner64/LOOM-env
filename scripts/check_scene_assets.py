@@ -19,9 +19,9 @@ def main():
     args = parser.parse_args()
     args.output_dir.mkdir(parents=True, exist_ok=True)
     collection = load_collection(args.collection)
-    from isaaclab.app import AppLauncher
+    from loom_env.runtime.app import launch_app
 
-    launcher = AppLauncher(
+    launcher = launch_app(
         headless=True, enable_cameras=bool(collection.deployment.cameras)
     )
     env = None

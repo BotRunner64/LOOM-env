@@ -76,9 +76,9 @@ def main():
     deployment = collection.deployment
     source = MotionSource(deployment)
 
-    from isaaclab.app import AppLauncher
+    from loom_env.runtime.app import launch_app
 
-    launcher = AppLauncher(headless=True, enable_cameras=True)
+    launcher = launch_app(headless=True, enable_cameras=True)
     app = launcher.app
     try:
         import isaaclab.sim as sim_utils

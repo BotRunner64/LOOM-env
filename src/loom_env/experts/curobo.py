@@ -77,6 +77,7 @@ class ArmPlanner:
         ):
             raise ValueError("Planner and deployment joint orders disagree")
         self.attached = False
+        self.world_loaded = False
 
     def _state(self, q, arm=None):
         arm = self.arm if arm is None else arm
@@ -115,14 +116,28 @@ class ArmPlanner:
             )
         meshes = []
         for name in self.scene.objects:
-            if name == self.target_object and (allow_object_contact or self.attached):
-                continue
             mesh = copy(self.meshes[name])
             local = self._local_pose(truth[f"{name}/pose_world"])
             mesh.pose = local[[0, 1, 2, 6, 3, 4, 5]].tolist()
             meshes.append(mesh)
-        self.planner.update_world(Scene(cuboid=boxes, mesh=meshes))
-        return len(boxes) + len(meshes)
+        checker = self.planner.scene_collision_checker
+        if not self.world_loaded:
+            # Geometry is fixed for this planner's lifetime. Load it once,
+            # including the target, so contact phases only toggle its collision.
+            self.planner.update_world(Scene(cuboid=boxes, mesh=meshes))
+            self.world_loaded = True
+        else:
+            for obstacle in [*boxes, *meshes]:
+                checker.update_obstacle_pose(
+                    obstacle.name, Pose.from_list(obstacle.pose)
+                )
+            # Match MotionPlanner.update_world: graph paths from the previous
+            # scene must not survive a pose or collision-mask change.
+            if self.planner.graph_planner is not None:
+                self.planner.graph_planner.reset_buffer()
+        exclude_target = allow_object_contact or self.attached
+        checker.enable_obstacle(self.target_object, not exclude_target)
+        return len(boxes) + len(meshes) - int(exclude_target)
 
     def attach(self, observation, truth):
         """Planning geometry only; the simulator object remains a free rigid body."""

@@ -32,5 +32,19 @@ def simulation_config(deployment):
         # PhysX warns that applying external forces only once per TGS step
         # produces noisy velocities. Apply gravity at every solver iteration.
         physics=PhysxCfg(enable_external_forces_every_iteration=True),
-        render=sim_utils.RenderCfg(ambient_light_intensity=0.3),
+        render=render_config(),
+    )
+
+
+def render_config():
+    """Explicit camera rendering shared by task environments and smoke checks."""
+    return sim_utils.RenderCfg(
+        rendering_mode="quality",
+        antialiasing_mode="DLAA",
+        enable_translucency=True,
+        enable_reflections=True,
+        enable_global_illumination=True,
+        dlss_mode=2,
+        enable_dlssg=False,
+        ambient_light_intensity=0.3,
     )

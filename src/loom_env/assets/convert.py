@@ -7,6 +7,8 @@ from pathlib import Path
 def main():
     from isaaclab.app import AppLauncher
 
+    from loom_env.runtime.app import launch_app
+
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("kind", choices=("urdf", "mesh"))
     parser.add_argument("input", type=Path)
@@ -21,7 +23,7 @@ def main():
     if not source.is_file():
         parser.error(f"Input asset does not exist: {source}")
 
-    app = AppLauncher(args).app
+    app = launch_app(args).app
     try:
         from isaaclab.sim.converters import (
             MeshConverter,

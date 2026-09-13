@@ -10,9 +10,9 @@ if os.environ.get("OMNI_KIT_ACCEPT_EULA", "").upper() not in {"Y", "YES", "1"}:
     )
 
 # The application must start before importing simulator-dependent modules.
-from isaaclab.app import AppLauncher
+from loom_env.runtime.app import launch_app
 
-launcher = AppLauncher(headless=True, enable_cameras=True)
+launcher = launch_app(headless=True, enable_cameras=True)
 app = launcher.app
 try:
     import torch
@@ -25,8 +25,15 @@ try:
     from isaaclab_physx.physics import PhysxCfg
     from isaaclab_physx.renderers import IsaacRtxRendererCfg
 
+    from loom_env.scenes.isaac_lab import render_config
+
     sim = sim_utils.SimulationContext(
-        sim_utils.SimulationCfg(dt=1.0 / 120.0, device="cuda:0", physics=PhysxCfg())
+        sim_utils.SimulationCfg(
+            dt=1.0 / 120.0,
+            device="cuda:0",
+            physics=PhysxCfg(enable_external_forces_every_iteration=True),
+            render=render_config(),
+        )
     )
     floor = sim_utils.CuboidCfg(
         size=(2.0, 2.0, 0.1),
@@ -54,8 +61,8 @@ try:
     camera = Camera(
         CameraCfg(
             prim_path="/World/Camera",
-            height=64,
-            width=64,
+            height=320,
+            width=320,
             data_types=["rgb"],
             renderer_cfg=IsaacRtxRendererCfg(),
             spawn=sim_utils.PinholeCameraCfg(clipping_range=(0.01, 10.0)),
@@ -75,7 +82,7 @@ try:
     height = cube.data.root_pos_w.torch[0, 2].item()
     rgb = camera.data.output["rgb"].torch[0, ..., :3]
     assert 0.03 < height < 0.08, f"Unexpected settled cube height: {height}"
-    assert rgb.shape == (64, 64, 3), rgb.shape
+    assert rgb.shape == (320, 320, 3), rgb.shape
     assert torch.isfinite(rgb.float()).all() and rgb.float().std() > 0
     output_dir = Path(
         os.environ.get(

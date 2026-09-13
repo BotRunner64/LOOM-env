@@ -44,9 +44,9 @@ def main():
         collection = replace(collection, arm_roles={"manipulator": args.arm})
     if args.max_steps is not None:
         collection = replace(collection, max_steps=args.max_steps)
-    from isaaclab.app import AppLauncher
+    from loom_env.runtime.app import launch_app
 
-    launcher = AppLauncher(
+    launcher = launch_app(
         headless=True, enable_cameras=bool(collection.deployment.cameras)
     )
     code = 0

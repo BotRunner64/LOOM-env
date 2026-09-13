@@ -487,7 +487,27 @@ class ManipulationEnvironment(ManagerBasedEnv):
                 },
                 "rendering": {
                     "dome_light_intensity": self.scene.cfg.light.spawn.intensity,
-                    "ambient_light_intensity": self.cfg.sim.render.ambient_light_intensity,
+                    "config": plain(self.cfg.sim.render),
+                    "runtime_settings": {
+                        key: self.sim.get_setting(key)
+                        for key in (
+                            "/UJITSO/geometry",
+                            "/persistent/UJITSO/geometry",
+                            "/rtx-transient/hydra/geometrystreaming/active",
+                            "/rtx/hydra/readTransformsFromFabricInRenderDelegate",
+                            "/rtx/rendermode",
+                            "/rtx/post/aa/op",
+                            "/rtx/post/dlss/execMode",
+                            "/rtx/translucency/enabled",
+                            "/rtx/reflections/enabled",
+                            "/rtx/indirectDiffuse/enabled",
+                            "/rtx-transient/dlssg/enabled",
+                            "/rtx/shadows/enabled",
+                            "/rtx/ambientOcclusion/enabled",
+                            "/rtx/rtpt/maxBounces",
+                            "/rtx/sceneDb/ambientLightIntensity",
+                        )
+                    },
                 },
             },
             asset_versions={

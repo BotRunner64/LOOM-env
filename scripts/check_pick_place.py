@@ -42,9 +42,9 @@ def main():
     with EpisodeReader(args.episode) as original:
         if original.manifest["outcome"]["code"] != "success":
             parser.error("The reference must be a successful place episode")
-        from isaaclab.app import AppLauncher
+        from loom_env.runtime.app import launch_app
 
-        launcher = AppLauncher(
+        launcher = launch_app(
             headless=True,
             enable_cameras=bool(original.spec.collection.deployment.cameras),
         )

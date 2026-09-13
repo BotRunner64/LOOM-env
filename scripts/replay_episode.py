@@ -40,9 +40,9 @@ def main():
                 "replay_of": str(original.path.resolve()),
             },
         )
-        from isaaclab.app import AppLauncher
+        from loom_env.runtime.app import launch_app
 
-        launcher = AppLauncher(
+        launcher = launch_app(
             headless=True, enable_cameras=bool(spec.collection.deployment.cameras)
         )
         code = 1

@@ -38,6 +38,28 @@ python scripts/check_scene_assets.py --output-dir outputs/scene-health
 
 检查工作区内物体的物理静置，并将真实物体释放到篮子中检查内腔碰撞及放置判据；输出 `validation.json` 和实际仿真相机 PNG。初态要求机械臂关节距初始目标小于 0.003 rad、物体水平偏移不超过 5 mm、最低点距支撑面不超过 3 mm，连续满足 0.25 s，最多等待 5 s。初态采样与准备步骤不进入正式轨迹，不以速度决定是否接受初态。
 
+## 相机渲染
+
+项目启动设置由 `loom_env.runtime.app.launch_app` 统一提供；扩展路径、材质初始化和剩余上游诊断见[环境说明](environment.md)。`loom_env.scenes.isaac_lab.render_config()` 同时用于任务和独立 GPU／RGB 检查。
+
+所有任务环境统一使用 `src/loom_env/scenes/isaac_lab.py` 的 `simulation_config()`。参考 RoboDojo 的默认渲染配置，明确选择 `quality` 预设、`DLAA` 抗锯齿，开启透射、反射和全局光照，设置 `dlss_mode=2`；明确关闭 DLSS 帧生成。未显式覆盖的选项由当前安装的 Lab quality 预设决定，不再依赖 headless experience 的默认画质。场景环境光强度保留 0.3，DomeLight 强度为 600。
+
+DLAA 使用原生分辨率进行抗锯齿；`dlss_mode=2` 保留 RoboDojo 的配置值，不表示改回 DLSS 抗锯齿。高质量渲染可能增加运行时间及显存占用。RoboDojo 使用 Sim 5.1，而当前环境使用 Sim 6，因此同名 quality 预设并不保证逐像素一致。每回合的 `manifest.json` 在 `spec.sampled_parameters.rendering` 下记录 RenderCfg 和运行时关键设置，版本记录在 `spec.runtime_versions`。检查 `/rtx/post/aa/op` 为 4（DLAA）、帧生成为 false，以及光照相关开关；画面效果仍通过相机视频验收。
+
+2026-09-13 的 seed 0 抓放验收在 205 步成功，三个相机视频完整性校验通过，DLSS 输入尺寸警告为 0 条。运行时确认 DLAA（值 4）、反射／透射／全局光照开启、帧生成关闭，quality 预设启用阴影和环境遮蔽、最大反弹次数为 3。动作、关节状态和物体位姿与旧配置一致，接触力最大绝对差约 `1.9e-6`。测量和关键帧对照位于 `.cache/checks/rendering/report.json`、`comparison.png`，视频为 `.cache/checks/rendering/quality/videos/place-quality.mp4`；该结果只覆盖本次场景与种子，不表示所有上游渲染警告已经解决。
+
+复现：从仓库根目录激活完整 `loom-env` 环境，按[环境说明](environment.md)配置 EULA 和 GPU，并准备默认 Panda、桌子、积木、篮子资产后执行：
+
+```bash
+mkdir -p .cache/checks/rendering
+python scripts/collect.py --output-dir .cache/checks/rendering/quality \
+  --episode-id place-quality --seed 0 > .cache/checks/rendering/quality.log 2>&1
+python scripts/inspect_data.py episode \
+  .cache/checks/rendering/quality/episodes/place-quality
+```
+
+期望 `RESULT.outcome.code=success`、`video_error=null`，查看上述视频和 manifest 中的渲染设置。重复运行需更换回合 ID 或输出目录；其他已知日志问题见[采集日志说明](environment.md#采集日志与已知剩余问题)。
+
 ## 采集与重放
 
 ```bash
