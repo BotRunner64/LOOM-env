@@ -26,8 +26,6 @@ def main():
             "x5",
             "ur5_wsg",
             "xarm6_robotiq",
-            "openarm_left",
-            "openarm_right",
         ],
     )
     parser.add_argument("--asset-root", type=Path, default=Path(".cache/assets"))

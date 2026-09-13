@@ -20,7 +20,6 @@ ROOT = Path(__file__).resolve().parents[1]
         ("x5", 14),
         ("ur5_wsg", 14),
         ("xarm6_robotiq", 14),
-        ("openarm", 16),
         ("yam", 14),
     ],
 )

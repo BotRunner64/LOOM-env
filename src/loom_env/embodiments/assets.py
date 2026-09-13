@@ -31,12 +31,6 @@ SOURCES = {
         "archive": "xarm6.zip",
         "sha256": "4da3a80c2fa13adf0af0383ec7be83c48e2afb452c61b16d806a7f5506fc9312",
     },
-    "openarm": {
-        "repository": "https://github.com/enactic/openarm_description",
-        "revision": "14ff67b638ff1c738a1b9a6be8aaa5ce5ed2c831",
-        "archive": "openarm.zip",
-        "sha256": "88a492b2890ddfccb9eb0524e0820b4210193d42f61ab32f07b6e23eb9ecd3f2",
-    },
 }
 # Only model-specific choices live here. Joint names, limits and deployment poses
 # belong to the deployment preset; physical effort/velocity limits come from URDF.
@@ -97,32 +91,6 @@ MODELS = {
                 "right_inner_finger",
             ),
         ),
-    ),
-    "openarm_support": dict(
-        asset="enactic:openarm-support",
-        source="openarm",
-        urdf="assets/robot/openarm_v1.0/urdf/example/v1.urdf",
-        base="openarm_body_link0",
-    ),
-    "openarm_left": dict(
-        asset="enactic:openarm-left",
-        preparation_version=4,
-        source="openarm",
-        urdf="assets/robot/openarm_v1.0/urdf/example/v1.urdf",
-        base="openarm_left_link0",
-        arm_gains=(400.0, 40.0),
-        gripper_gains=(2000.0, 100.0),
-        collision_groups=(("openarm_left_link5", "openarm_left_link7"),),
-    ),
-    "openarm_right": dict(
-        asset="enactic:openarm-right",
-        preparation_version=4,
-        source="openarm",
-        urdf="assets/robot/openarm_v1.0/urdf/example/v1.urdf",
-        base="openarm_right_link0",
-        arm_gains=(400.0, 40.0),
-        gripper_gains=(2000.0, 100.0),
-        collision_groups=(("openarm_right_link5", "openarm_right_link7"),),
     ),
 }
 CONVERSION_ARGS = (

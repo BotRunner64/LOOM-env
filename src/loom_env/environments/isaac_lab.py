@@ -30,7 +30,6 @@ from isaaclab_physx.sensors import ContactSensorCfg
 
 from loom_env.embodiments.cameras import CameraMounts, camera_config
 from loom_env.embodiments.manipulation import manipulation_profile
-from loom_env.embodiments.supports import support_config
 from loom_env.embodiments.isaac_lab import DualArmArticulation, articulation_config
 from loom_env.assets.catalog import (
     asset_definition,
@@ -206,11 +205,6 @@ def environment_config(collection, asset_root):
                 asset_root,
             ),
         )
-    support = support_config(
-        collection.deployment, asset_root, f"{prefix}/robot_support"
-    )
-    if support is not None:
-        scene.robot_support = support
     scene.light = AssetBaseCfg(
         prim_path="/World/Light", spawn=sim_utils.DomeLightCfg(intensity=600)
     )

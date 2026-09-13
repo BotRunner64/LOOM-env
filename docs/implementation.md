@@ -190,6 +190,6 @@ python scripts/inspect_data.py episode outputs/piper-repeat/episodes/piper-place
 
 切换 `--collection configs/collection/lift.yaml` 即抓起任务；更换 `--deployment`、`--scene`、`--seed` 分别控制本体、布局配置和采样。每次使用新的 episode ID。成功时终端输出 `RESULT` 的 `outcome.code=success`；失败时同一记录保留阶段事件、物理状态及图像，可用相同视频入口检查。
 
-已有 Episode 保存生成时的任务定义；物理重放应使用对应代码版本，按新标准重新判定需显式选用当前任务定义并另存结果。当前接触测量与专家已接入七类本体，逐类抓放验收与复现入口见[本体文档](embodiments.md#抓放录制)；关节物体、完整厨房、多物体连续整理、异构并行和 Context 配对尚未实现。
+已有 Episode 保存生成时的任务定义；物理重放应使用对应代码版本，按新标准重新判定需显式选用当前任务定义并另存结果。当前接触测量与专家已接入六类本体，逐类抓放验收与复现入口见[本体文档](embodiments.md#抓放录制)；关节物体、完整厨房、多物体连续整理、异构并行和 Context 配对尚未实现。
 
 此前程序化方块场景的历史数据保留在本地输出中，其物理重放应使用生成时的代码版本；当前入口已迁移到真实资产配置，不提供旧场景适配。

@@ -19,7 +19,7 @@ class UnusedPlanner:
 
 
 @pytest.mark.parametrize(
-    "name", ["panda", "piper", "x5", "ur5_wsg", "yam", "xarm6_robotiq", "openarm"]
+    "name", ["panda", "piper", "x5", "ur5_wsg", "yam", "xarm6_robotiq"]
 )
 @pytest.mark.parametrize("base_yaw", [0.0, 0.7])
 def test_grasp_goal_places_contact_center_on_object(collection, name, base_yaw):
@@ -130,7 +130,7 @@ def test_contact_evidence_uses_fraction_for_linear_and_angular_commands(limits):
     assert not opposing_contacts(-np.abs(forces), low + 0.4 * (high - low), limits)
 
 
-@pytest.mark.parametrize("name", ["yam", "xarm6_robotiq", "openarm"])
+@pytest.mark.parametrize("name", ["yam", "xarm6_robotiq"])
 def test_float32_opening_boundary_survives_validation_and_revalidation(name):
     from loom_env.embodiments.commands import initial_command
 

@@ -6,11 +6,11 @@
 
 任务、场景、部署分别配置，采集、重放和运动预览共用真实资产定义。首批场景使用 ManiSkill 木桌、RoboDojo 积木和收纳篮；提供抓起物体、放入容器两个任务。资产来源、固定版本、碰撞表示和功能标注集中维护，下载与转换产物放在 `.cache/assets/` 或共享目录。任务不依赖具体对象名称，环境不选择任务或专家，统一 Runner 负责执行与记录。
 
-双 Panda 接入接触测量与任务专家。Piper、X5、UR5＋WSG、xArm6＋Robotiq、OpenArm、YAM 保留双臂运动、FK 和夹爪诊断接口，尚未接入抓取专家。当前物理验收范围见[实现说明](docs/implementation.md)。
+Panda、Piper、X5、UR5＋WSG、xArm6＋Robotiq、YAM 已接入双臂控制、接触测量与抓放专家；六类本体均有单回合抓放成功记录。当前物理验收范围见[本体支持文档](docs/embodiments.md#抓放录制)。
 
 - [当前实现与运行方式](docs/implementation.md)：资产准备、采集、重放和验证结果。
 - [场景资产与扩展边界](docs/scene-assets.md)：来源筛选、质量检查、功能标注和扩展步骤。
-- [本体支持与资产准备](docs/embodiments.md)：七类本体的来源、接口与验证范围。
+- [本体支持与资产准备](docs/embodiments.md)：六类本体的来源、接口与验证范围。
 - [架构设计](docs/architecture.md)：配置组合、Runner、Episode 协议与 Context 实验规划。
 - [环境安装](docs/environment.md)：固定依赖与 GPU／仿真环境。
 

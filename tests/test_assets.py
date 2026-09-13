@@ -47,7 +47,7 @@ def test_converted_asset_verification_rejects_tampering(tmp_path, name):
 
 
 def test_verified_hash_does_not_allow_mirrored_collision(tmp_path):
-    name = "openarm_right"
+    name = "yam"
     root = tmp_path / "assets"
     original, urdf, usd = (
         source_urdf(root, name),

@@ -76,22 +76,6 @@ PROFILES = {
         (1.0, 0.0, 0.0, 0.0),
         ("link_base",),
     ),
-    **{
-        f"enactic:openarm-{side}": ParallelJaw(
-            f"openarm_{side}_link7",
-            (f"openarm_{side}_right_finger", f"openarm_{side}_left_finger"),
-            (0.0, 0.0, 0.17),
-            # Undo the official side-mounted shoulder roll for a downward palm.
-            (
-                0.0,
-                0.7071054825112363,
-                0.7071080798594735 * (1 if side == "left" else -1),
-                0.0,
-            ),
-            (f"openarm_{side}_link0",),
-        )
-        for side in ("left", "right")
-    },
 }
 PIPER_PLANNING_FILES = {
     "curobo_tmp.yml": "635fb098c64ab1e274039f19bf51a710ed4d2628ce819b989387f78277198067",

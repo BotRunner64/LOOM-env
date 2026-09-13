@@ -21,7 +21,6 @@ from loom_env.embodiments.assets import (
     CONVERSION_ARGS,
     preparation_version,
     source_dir,
-    source_tree,
     source_urdf,
     prepared_urdf,
     converted_usd,
@@ -71,7 +70,6 @@ def extract_source(root, source, names):
 
 def normalize_urdf(root, name):
     """Keep source files intact; record all simulator-specific repairs in asset.json."""
-    model = MODELS[name]
     original = source_urdf(root, name)
     robot = ET.parse(original).getroot()
     changes = []
@@ -87,30 +85,6 @@ def normalize_urdf(root, name):
                     if child is not None:
                         collision.append(deepcopy(child))
         changes.append("Use YAM visual meshes as convex collision geometry")
-    if model["source"] == "openarm":
-        # Official example contains torso + both arms. Keep the requested arm's
-        # rooted subtree, preserving every local transform and its handed limits.
-        links = {model["base"]}
-        while name != "openarm_support":
-            children = {
-                j.find("child").get("link")
-                for j in robot.findall("joint")
-                if j.find("parent").get("link") in links
-            }
-            if children <= links:
-                break
-            links |= children
-        for child in list(robot):
-            if child.tag == "link" and child.get("name") not in links:
-                robot.remove(child)
-            elif child.tag == "joint" and (
-                child.find("parent").get("link") not in links
-                or child.find("child").get("link") not in links
-            ):
-                robot.remove(child)
-            elif child.tag not in {"link", "joint", "material"}:
-                robot.remove(child)
-        changes.append(f"Extract component rooted at {model['base']}")
     for joint in robot.findall("joint"):
         limits = joint.findall("limit")
         if len(limits) > 1:
@@ -144,13 +118,7 @@ def normalize_urdf(root, name):
         )
     for mesh in robot.findall(".//mesh"):
         filename = mesh.get("filename")
-        if filename.startswith("package://"):
-            package, relative = filename.removeprefix("package://").split("/", 1)
-            if package != "openarm_description":
-                raise ValueError(f"Unknown mesh package: {package}")
-            file = source_tree(root, model["source"]) / relative
-        else:
-            file = original.parent / filename
+        file = original.parent / filename
         if not file.is_file():
             raise FileNotFoundError(file)
         if file.suffix.lower() == ".glb":
@@ -197,31 +165,6 @@ def normalize_urdf(root, name):
             changes.append(
                 f"Bake reflected collision mesh scale into vertices: {index}"
             )
-    if name == "openarm_support":
-        import numpy as np
-        import trimesh
-        from scipy.spatial.transform import Rotation
-
-        geometries = []
-        for collider in robot.findall("link/collision"):
-            element = collider.find("geometry/mesh")
-            mesh = trimesh.load(element.get("filename"), force="mesh")
-            mesh.apply_scale(np.fromstring(element.get("scale", "1 1 1"), sep=" "))
-            origin = collider.find("origin")
-            matrix = np.eye(4)
-            if origin is not None:
-                matrix[:3, :3] = Rotation.from_euler(
-                    "xyz", np.fromstring(origin.get("rpy", "0 0 0"), sep=" ")
-                ).as_matrix()
-                matrix[:3, 3] = np.fromstring(origin.get("xyz", "0 0 0"), sep=" ")
-            mesh.apply_transform(matrix)
-            geometries.append(mesh)
-        mesh = trimesh.util.concatenate(geometries)
-        directory = root / name / "meshes"
-        directory.mkdir(parents=True, exist_ok=True)
-        np.savez_compressed(
-            directory / "collision.npz", vertices=mesh.vertices, faces=mesh.faces
-        )
     changes.append("Resolve mesh references to verified local source files")
     destination = prepared_urdf(root, name)
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -232,9 +175,7 @@ def normalize_urdf(root, name):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "models", nargs="+", choices=[*MODELS, "openarm", "all", "scene"]
-    )
+    parser.add_argument("models", nargs="+", choices=[*MODELS, "all", "scene"])
     parser.add_argument("--asset-root", type=Path, default=ROOT / ".cache/assets")
     parser.add_argument(
         "--source-root", type=Path, help="Shared sim_projects root for scene assets"
@@ -257,8 +198,6 @@ def main():
             continue
         if choice == "all":
             names.extend(MODELS)
-        elif choice == "openarm":
-            names.extend(("openarm_support", "openarm_left", "openarm_right"))
         else:
             names.append(choice)
     names = list(dict.fromkeys(names))
@@ -285,7 +224,7 @@ def main():
             )
             if not (converted / name / f"{name}.usda").is_file():
                 raise RuntimeError(f"Converter did not produce the expected {name} USD")
-            from pxr import Usd, UsdGeom, UsdPhysics
+            from pxr import Usd, UsdPhysics
 
             if name == "yam":
                 # A single hull fills the interlocking fingers' recesses and
@@ -310,29 +249,7 @@ def main():
                 changes.append("Use PhysX convex decomposition for both YAM fingers")
 
             stage = Usd.Stage.Open(str(converted / name / f"{name}.usda"))
-            if name == "openarm_support":
-                # A one-link fixed support is imported as static geometry.
-                visible = [
-                    p
-                    for p in Usd.PrimRange(
-                        stage.GetDefaultPrim(), Usd.TraverseInstanceProxies()
-                    )
-                    if p.IsA(UsdGeom.Mesh)
-                    and UsdGeom.Mesh(p).ComputeVisibility() != "invisible"
-                    and UsdGeom.Mesh(p).GetPointsAttr().Get()
-                ]
-                if not visible or not any(
-                    p.HasAPI(UsdPhysics.CollisionAPI)
-                    for p in Usd.PrimRange(
-                        stage.GetDefaultPrim(), Usd.TraverseInstanceProxies()
-                    )
-                ):
-                    raise ValueError(
-                        "Official support requires visible and collision geometry"
-                    )
-                visual_counts = {MODELS[name]["base"]: len(visible)}
-            else:
-                visual_counts = validate_visuals(stage.GetDefaultPrim())
+            visual_counts = validate_visuals(stage.GetDefaultPrim())
             stage = None
             destination = root / name / "usd"
             if destination.exists():
