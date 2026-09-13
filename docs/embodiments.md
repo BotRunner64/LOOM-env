@@ -1,9 +1,5 @@
 # 本体支持与资产准备
 
-[返回项目入口](../README.md) · [设计说明](architecture.md) · [运行指南](implementation.md)
-
-本体接口、准备命令和专项验收见本文；项目整体进度以 README 为准。
-
 任务和数据始终使用 `left`、`right`；每臂保留真实的 6／7 个机械臂关节，夹爪命令和物理关节分别描述。通过部署 YAML 切换本体，控制、重置、记录、视频导出及运动学检查使用同一套入口。
 
 | 部署文件（`configs/deployments/`） | 每臂关节 | 夹爪物理关节 | 夹爪命令 | 双臂动作维度 | 末端测量坐标系 |
@@ -50,7 +46,6 @@ python scripts/export_video.py outputs/x5-pp-repeat/episodes/x5-pp \
 六类成功视频位于 `outputs/all-pp/videos/<model>.mp4`，每个视频并排显示 front、left_wrist、right_wrist。Piper 复用当前相机配置下已经成功的回合，其余五类在本轮新录制。失败尝试保留在各本体目录，不能据其文件存在判断任务成功；检查 Episode `manifest.json` 的 `outcome`。这些结果仅验证所列单个回合，未覆盖多 seed、左右臂角色互换或实机。
 
 X5 的首次抓放已夹起物体，但远端篮子不可达，因此使用近距离横向转移布局。YAM 的开合方向在本轮纠正，历史运动视频中的命令语义不代表当前部署。
-
 
 ## 资产来源与存放
 

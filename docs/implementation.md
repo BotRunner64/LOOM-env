@@ -1,7 +1,5 @@
 # 运行指南
 
-[返回项目入口](../README.md) · [设计说明](architecture.md)
-
 本文用于运行现有配置、采集和检查轨迹。当前能力见项目入口，具体试验过程见[任务验证记录](validation.md)。
 
 ## 运行前
@@ -39,7 +37,6 @@ python scripts/check_scene_assets.py --output-dir outputs/scene-health
 ```
 
 检查工作区内物体的物理静置，并将真实物体释放到篮子中检查内腔碰撞及放置判据；输出 `validation.json` 和实际仿真相机 PNG。初态要求机械臂关节距初始目标小于 0.003 rad、物体水平偏移不超过 5 mm、最低点距支撑面不超过 3 mm，连续满足 0.25 s，最多等待 5 s。初态采样与准备步骤不进入正式轨迹，不以速度决定是否接受初态。
-
 
 ## 采集与重放
 

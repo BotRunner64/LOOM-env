@@ -1,9 +1,5 @@
 # 场景资产接入与扩展
 
-[返回项目入口](../README.md) · [设计说明](architecture.md) · [运行指南](implementation.md)
-
-场景资产的接入约定与扩展步骤见本文；项目整体进度以 README 为准。
-
 首批选用 ManiSkill 木桌、RoboDojo 积木和收纳篮，保留真实模型与材质。资产来源、固定 revision、源文件 SHA-256、单位、尺寸和功能标注集中在 [资产目录](../src/loom_env/assets/catalog.py)，本文不重复维护版本值。
 
 ## 已接入资产
