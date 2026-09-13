@@ -1,5 +1,9 @@
 # 开发与仿真环境
 
+[返回项目入口](../README.md) · [设计说明](architecture.md) · [运行指南](implementation.md)
+
+依赖安装、固定版本与启动排查见本文；项目整体进度以 README 为准。
+
 环境名：`loom-env`。目标平台：Linux x86_64、Python 3.12、NVIDIA RTX GPU。采用 **Isaac Sim 6.0.1 + Isaac Lab 3.0 Beta 2 Patch 1**，物理后端为 PhysX，图像渲染使用 Isaac RTX。
 
 ## 固定版本
