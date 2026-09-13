@@ -55,18 +55,18 @@ python scripts/check_env.py --curobo
 
 检查项目依赖范围、`pip check`、数据读写、CUDA 矩阵运算、cuRobo 正向运动学及梯度，以及小网格的远处无碰撞和近处碰撞。结果写入 `.cache/checks/report.json`，子进程日志在同目录。版本检查通过不能替代仿真和实际任务验收。
 
-使用 Isaac Sim 前需接受 [NVIDIA Omniverse EULA](https://docs.omniverse.nvidia.com/platform/latest/common/NVIDIA_Omniverse_License_Agreement.html)。同意后：
+首次启动若出现 [NVIDIA Omniverse EULA](https://docs.omniverse.nvidia.com/platform/latest/common/NVIDIA_Omniverse_License_Agreement.html) 提示，阅读并按提示确认：
 
 ```bash
-export OMNI_KIT_ACCEPT_EULA=YES
-# 仅以 root 运行的容器需要。
-export OMNI_KIT_ALLOW_ROOT=1
 python scripts/check_env.py --sim
 ```
 
 `--sim` 创建本地几何体，执行 GPU PhysX 步进，检查方块落地高度及 64×64 RGB 相机输出；无需机器人资产。成功时保存 `.cache/checks/simulation-rgb.png`。headless 渲染仍依赖 GPU 图形驱动。实际任务的资产准备、采集和重放见[运行指南](implementation.md)。
 
 ## 当前节点与排查
+
+- 非交互运行：已同意 EULA 时，可设置 `OMNI_KIT_ACCEPT_EULA=YES` 避免交互提示。
+- root 容器：仅在以 root 身份运行且启动被拒绝时，设置 `OMNI_KIT_ALLOW_ROOT=1`。
 
 当前节点使用 RTX 4090。若 Vulkan 未选择 NVIDIA ICD，在运行仿真前设置本节点路径：
 
@@ -86,7 +86,7 @@ export VK_ICD_FILENAMES=/etc/vulkan/icd.d/nvidia_icd.json
 
 机器人与场景准备统一通过 `python -m loom_env.assets.convert` 调用已安装 Lab 的转换 API。该模块只负责在独立仿真进程中转换，资产校验和发布仍由 `scripts/prepare_assets.py` 完成。URDF 保留原固定基座、合并固定关节和关节驱动参数；桌面保留三角网格转换设置。
 
-在仓库根目录、激活完整仿真环境并设置上文 EULA / Vulkan 变量后，可用已准备的 Piper URDF 和共享桌面源文件检查转换，不覆盖正式资产：
+在仓库根目录、激活完整仿真环境后，可用已准备的 Piper URDF 和共享桌面源文件检查转换，不覆盖正式资产：
 
 ```bash
 python -m loom_env.assets.convert urdf .cache/assets/piper/piper.urdf \
@@ -99,4 +99,4 @@ python -m loom_env.assets.convert mesh \
 
 首次使用应先按[机器人说明](embodiments.md#准备并运行)准备 Piper，并按[场景资产说明](scene-assets.md)取得桌面源文件；其他节点替换共享路径。成功时输出 `ASSET_CONVERTED`，结果分别为 `piper-usd/piper/piper.usda` 和 `table.usd`。缺少输入文件时直接报错；仿真启动问题按上文排查。
 
-迁移后正式环境的依赖检查、数据读写、CUDA、cuRobo 正向运动学／梯度、小网格碰撞和 GPU PhysX／RTX 检查全部通过，报告为 `.cache/checks/environment-migration/checks/report.json`，渲染图像为同目录 `simulation-rgb.png`。复现：仓库根目录激活 `loom-env` 并设置上文 EULA／Vulkan 变量后，执行 `python scripts/check_env.py --curobo --sim --output-dir .cache/checks/environment-migration/checks`；各项 `passed` 应为 `true`。该检查不替代抓放任务效果验收。
+迁移后正式环境的依赖检查、数据读写、CUDA、cuRobo 正向运动学／梯度、小网格碰撞和 GPU PhysX／RTX 检查全部通过，报告为 `.cache/checks/environment-migration/checks/report.json`，渲染图像为同目录 `simulation-rgb.png`。复现：仓库根目录激活 `loom-env` 后，执行 `python scripts/check_env.py --curobo --sim --output-dir .cache/checks/environment-migration/checks`；各项 `passed` 应为 `true`。该检查不替代抓放任务效果验收。

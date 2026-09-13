@@ -4,7 +4,7 @@
 
 ## 运行前
 
-所有命令从仓库根目录执行。先完成[完整仿真安装](environment.md#完整仿真)，激活 `loom-env`，设置该文档中的 EULA／Vulkan 环境变量，再准备下述场景资产；本地 URDF 本体还需按[本体准备说明](embodiments.md#准备并运行)生成资产和规划缓存。
+所有命令从仓库根目录执行。先完成[完整仿真安装](environment.md#完整仿真)，激活 `loom-env`，再准备下述场景资产；本地 URDF 本体还需按[本体准备说明](embodiments.md#准备并运行)生成资产和规划缓存。
 
 默认案例使用 Panda。每次采集使用新的 episode ID，重放输出目录也应未被占用。配置检查无需启动仿真：
 
@@ -16,7 +16,7 @@ python scripts/inspect_data.py config configs/collection/pick_place.yaml
 
 ## 资产准备
 
-先完成 [环境安装](environment.md)，并按已有要求设置 `OMNI_KIT_ACCEPT_EULA=YES`。复用本机已有的固定版本资产：
+先完成[环境安装](environment.md)并激活 `loom-env`。复用本机已有的固定版本资产：
 
 ```bash
 python scripts/prepare_assets.py scene \

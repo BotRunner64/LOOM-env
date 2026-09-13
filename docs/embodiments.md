@@ -15,7 +15,7 @@
 
 ## 抓放录制
 
-在仓库根目录，激活本文所述 `loom-env` 环境并配置 EULA／Vulkan 环境变量；先准备机器人和场景资产。新接入模型还需要 CUDA 下生成规划碰撞球：
+在仓库根目录，激活本文所述 `loom-env` 环境；先准备机器人和场景资产。新接入模型还需要 CUDA 下生成规划碰撞球：
 
 ```bash
 python scripts/prepare_planning.py yam x5 ur5_wsg xarm6_robotiq
@@ -65,15 +65,9 @@ python scripts/collect.py --deployment configs/deployments/dual_x5.yaml \
 
 ## 准备并运行
 
-先按[环境文档](environment.md)安装完整仿真依赖。在已接受 NVIDIA EULA 的环境中，从仓库根目录执行：
+先按[环境文档](environment.md)安装完整仿真依赖。激活 `loom-env` 后，从仓库根目录执行：
 
 ```bash
-export OMNI_KIT_ACCEPT_EULA=YES
-export OMNI_KIT_ALLOW_ROOT=1
-export VK_DRIVER_FILES=/etc/vulkan/icd.d/nvidia_icd.json
-export VK_ICD_FILENAMES=/etc/vulkan/icd.d/nvidia_icd.json
-export PYTHONNOUSERSITE=1
-
 # 可指定一种或多种。
 python scripts/prepare_assets.py x5 ur5_wsg xarm6_robotiq yam
 # 全部本地 URDF 本体，包括 Piper 和 YAM；Panda 使用官方 USD，无需转换。
@@ -135,7 +129,7 @@ xArm 的 `camera_link` 本身并非光学中心。[ManiSkill 固定版本配置]
 
 ### 检查相机挂载
 
-只修改相机挂载时无需重新转换 USD。未准备资产时，先按本文资产准备及[场景资产准备](implementation.md#资产准备)完成机器人、桌面和物体的准备。按[环境文档](environment.md)激活 `loom-env` 并设置其中的 EULA／Vulkan 环境变量，在仓库根目录执行：
+只修改相机挂载时无需重新转换 USD。未准备资产时，先按本文资产准备及[场景资产准备](implementation.md#资产准备)完成机器人、桌面和物体的准备。按[环境文档](environment.md)激活 `loom-env`，在仓库根目录执行：
 
 ```bash
 # 为每次验证选一个新的目录，已有 Episode 不覆盖。
