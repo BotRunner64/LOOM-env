@@ -151,6 +151,8 @@ def test_collection_continues_after_video_failure(
     assert len(reports) == 2
     assert reports[0]["video_error"] == "OSError: test encoding failure"
     assert reports[0]["video_path"] is None
+    assert len(reports[0]["camera_video_paths"]) == 3
+    assert all(Path(p).exists() for p in reports[0]["camera_video_paths"].values())
     assert Path(reports[0]["episode_path"]).exists()
     assert reports[1]["video_error"] is None
     assert Path(reports[1]["video_path"]).exists()

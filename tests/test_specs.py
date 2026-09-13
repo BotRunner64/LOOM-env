@@ -93,7 +93,7 @@ def test_spec_deep_immutability_and_version_validation(spec):
     with pytest.raises(ValueError, match="asset"):
         replace(spec, asset_versions={})
     with pytest.raises(ValueError, match="schema_version"):
-        replace(spec, schema_version=2)
+        replace(spec, schema_version=spec.schema_version + 1)
     with pytest.raises(ValueError, match="JSON"):
         replace(spec, provenance={"bad": float("nan")})
     with pytest.raises(ValueError, match="identifier"):

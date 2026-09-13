@@ -51,13 +51,14 @@ python scripts/check_pick_place.py outputs/manipulation/episodes/place-demo \
   --output-dir outputs/manipulation-verification
 ```
 
-每条完整轨迹保存后，采集命令自动从已记录图像生成全部相机的横向拼接视频和首帧 PNG，无需另跑导出命令。例如上述放入任务输出：
+每条完整轨迹包含各相机独立的 MP4。保存后，采集命令自动从这些相机视频生成横向拼接预览和首帧 PNG，无需另跑导出命令。例如上述放入任务输出：
 
 - 轨迹：`outputs/manipulation/episodes/place-demo/`
-- 视频：`outputs/manipulation/videos/place-demo.mp4`
+- 相机视频：`outputs/manipulation/episodes/place-demo/cameras/{front,left_wrist,right_wrist}.mp4`
+- 拼接预览：`outputs/manipulation/videos/place-demo.mp4`
 - 首帧：`outputs/manipulation/videos/place-demo.png`
 
-成功与完整保存的失败回合均生成视频；未提交的 `.incomplete/` 回合不生成视频，无相机配置只保存轨迹。每回合的 `RESULT` 同时打印任务结果、`episode_path`、`video_path` 与 `video_error`。视频编码失败保留轨迹、报告错误并继续后续回合，整个命令以非零状态退出。批量采集使用 `--episodes N`，回合 ID 自动追加 `-0000` 等序号，种子逐条递增。
+成功与完整保存的失败回合均生成视频；未提交的 `.incomplete/` 回合不生成视频，无相机配置只保存轨迹。每回合的 `RESULT` 同时打印任务结果、`episode_path`、`camera_video_paths`、`video_path` 与 `video_error`。拼接预览编码失败保留完整轨迹及相机视频、报告错误并继续后续回合，整个命令以非零状态退出。批量采集使用 `--episodes N`，回合 ID 自动追加 `-0000` 等序号，种子逐条递增。
 
 `--deployment` 和 `--scene` 分别覆盖 collection 中的本体部署和场景，可显式选择任务、本体与布局的组合；组合的物理可行性仍需验证，最终展开的配置写入 Episode。`--episodes` 连续运行同一 collection 的多次初始化，`--arm left` / `right` 选择操作臂；其他臂保持明确目标。任务和对象角色不参与场景构建。同一部署和 scene 可切换任务或角色；重放要求场景、部署和资产版本匹配，恢复已记录的物理状态。
 
@@ -77,17 +78,47 @@ python scripts/preview_motion.py --output-dir outputs/motion --episode-id panda-
 
 ## Episode 协议
 
-每条已提交轨迹保存完整展开配置、种子、实际初态、资产和运行时版本、来源，以及 HDF5 数组。T 个动作对应 T+1 个观测和物理状态；动作分别记录输入和实际下发控制。事件标注引用对应的观测索引。
+当前协议为 **schema 2**：每回合一个目录，低维数组保存在 HDF5，RGB 按相机独立编码为 MP4，JSON 记录元数据。采集命令无需增加参数。
 
-前视、左腕、右腕三路 RGB 与时间戳、有效性、相机外参和内参按部署记录。关节和夹爪维度由部署定义；不同本体的补齐、归一化属于数据适配层。
+```text
+episodes/<id>/
+├── manifest.json
+├── trajectory.hdf5
+└── cameras/
+    ├── front.mp4
+    ├── left_wrist.mp4
+    └── right_wrist.mp4
+```
 
-Runner 区分 success、task_failure、timeout、invalid_setup、runtime_error。中断或不能保证物理步完整的异常保留在 `.incomplete/`，校验后的完整轨迹才进入 `episodes/`；同 ID 不覆盖已有数据。
+相机名称和数量由部署定义；无相机时不创建 `cameras/`。拼接预览和首帧 PNG 是回合目录外的派生产物，不作为训练图像来源。
+
+- `manifest.json`：完整展开配置、种子、实际初态、资产及运行时版本、来源、动作/观测描述、结果和事件。`camera_videos` 按相机记录相对文件路径、帧数、帧率、编码参数和 SHA-256；相机内参位于 `spec.sampled_parameters.camera_intrinsics`。
+- `trajectory.hdf5`：`data/demo_0` 下保存 `timestamps`、`observations`、`world_state`、`input_actions` 和 `applied_control_targets`。`observations` 包含机器人状态及相机的 `timestamp`、`valid`，不再保存 RGB 数组；相机外参在 `world_state/cameras/<name>/pose_world`。
+- 相机 MP4：H.264 / libx264，CRF 18、medium、YUV444、最长 20 帧一个关键帧，关闭 B 帧；保持部署分辨率、不缩放。YUV444 保留完整色度采样并支持奇数尺寸，但 RGB 仍是有损压缩，不保证逐像素一致。编码默认值集中在 `data/camera_video.py`。系统使用已有 `imageio-ffmpeg` 提供的 FFmpeg，无需额外安装命令行工具。
+
+**时间对齐**：T 个动作对应 T+1 个观测、世界状态和视频帧，`obs[k] → action[k] → obs[k+1]`；视频第 k 帧对应 `timestamps[k] = k * control_dt`，帧率为 `1 / control_dt`。相机低于控制频率时，仍每个控制步保存一帧（复用最近图像），保留真实采样时间戳和有效性标记，不丢弃或重排控制步。事件的 `step` 引用观测索引。关节及夹爪维度由部署定义；不同本体的补齐、归一化属于数据适配层。
+
+`EpisodeReader.observation(k)` 自动解码各相机第 k 帧，仍返回 `cameras/<name>/rgb` 的 uint8 H×W×3 数组；`observations()` 顺序解码，适合批量读取。随机读取可能需要从前一个关键帧解码，顺序访问更高效。动作、关节状态和物理真值不经过视频编码，保持原数值精度。
+
+**完整性**：状态和视频先写入 `.incomplete/<id>/`，关闭所有编码器后校验视频 SHA-256、尺寸、帧率、实际解码帧数和 T/T+1 对齐，全部通过才将整个目录发布到 `episodes/`。编码器启动、写入或退出失败都不能发布该回合。未完成视频不保证可以播放；排查 `.incomplete/<id>/attempt.json` 中的原因。完整失败回合仍可发布，结果区分 success、task_failure、timeout、invalid_setup、runtime_error；同 ID 不覆盖。
+
+在仓库根目录、激活 `loom-env` 后，可以离线校验和读取，无需启动仿真或准备资产：
 
 ```bash
 python scripts/inspect_data.py episode outputs/manipulation/episodes/place-demo
 python scripts/inspect_data.py index outputs/manipulation \
   --output outputs/manipulation/index.jsonl
+python - <<'PYTHON'
+from loom_env.data.episodes import EpisodeReader
+with EpisodeReader("outputs/manipulation/episodes/place-demo") as episode:
+    print("动作数:", len(episode))
+    print("首帧:", episode.observation(0).values["cameras/front/rgb"].shape)
+PYTHON
 ```
+
+检查命令输出 schema、结果及相机视频描述；损坏、缺失视频或不完整回合会失败。协议实现见 `src/loom_env/data/episodes.py`，视频编码见 `src/loom_env/data/camera_video.py`，拼接预览见 `src/loom_env/data/video.py`。
+
+schema 1（RGB 在 HDF5 内）不由当前读取器兼容，已有文件不会自动转换或删除。旧数据应保留原始文件，在独立目录显式转换并检查后使用；不要直接修改旧 manifest 的版本号。
 
 ## 使用范围
 

@@ -52,6 +52,7 @@ def main():
     code = 0
     env = source = None
     try:
+        from loom_env.data.episodes import read_manifest
         from loom_env.data.video import export_video
         from loom_env.runtime.build import create_environment, create_expert
         from loom_env.runtime.runner import EpisodeRunner
@@ -71,6 +72,16 @@ def main():
             )
             result = runner.run(spec, args.output_dir)
             report = plain(result)
+            report["camera_video_paths"] = (
+                {
+                    name: str(result.episode_path / descriptor["path"])
+                    for name, descriptor in read_manifest(result.episode_path)[
+                        "camera_videos"
+                    ].items()
+                }
+                if result.episode_path is not None
+                else {}
+            )
             report["video_path"] = None
             report["video_error"] = None
             if result.episode_path is not None and collection.deployment.cameras:

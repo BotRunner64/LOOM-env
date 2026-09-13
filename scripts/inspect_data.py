@@ -44,7 +44,16 @@ def main():
             }
         elif args.command == "episode":
             manifest = validate_episode(args.path)
-            result = {key: manifest[key] for key in ("id", "num_steps", "outcome")}
+            result = {
+                key: manifest[key]
+                for key in (
+                    "schema_version",
+                    "id",
+                    "num_steps",
+                    "outcome",
+                    "camera_videos",
+                )
+            }
         else:
             result = {
                 "episodes": build_index(args.root, args.output),

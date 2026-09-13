@@ -19,7 +19,7 @@ from typing import Any
 import numpy as np
 import yaml
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 ARMS = ("left", "right")
 
 

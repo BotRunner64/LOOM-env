@@ -1,4 +1,4 @@
-"""One immutable HDF5 episode plus JSON manifest per committed directory.
+"""One immutable episode: HDF5 states, per-camera MP4, and a JSON manifest.
 
 Only ``episodes/<id>/manifest.json`` is discoverable. Interrupted attempts stay
 in ``.incomplete/<id>``. Directory rename publishes data and metadata together.
@@ -8,6 +8,7 @@ Each worker must use a unique episode id; no shared HDF5 writer is needed.
 from __future__ import annotations
 
 from collections.abc import Iterator
+from contextlib import ExitStack
 import json
 import math
 import os
@@ -15,9 +16,16 @@ from pathlib import Path
 import tempfile
 from typing import Any
 
+import imageio.v2 as imageio
 import h5py
 import numpy as np
 
+from loom_env.data.camera_video import (
+    CameraVideoWriter,
+    VIDEO_ENCODING,
+    sha256,
+    video_path,
+)
 from loom_env.specs.config import SCHEMA_VERSION, EpisodeSpec, episode_from_dict, plain
 from loom_env.specs.episode import (
     Event,
@@ -48,13 +56,7 @@ def _datasets(group: h5py.Group) -> dict[str, h5py.Dataset]:
 
 def _observations(group: h5py.Group, timestamps: np.ndarray) -> Iterator[Observation]:
     datasets = _datasets(group)
-    bytes_per_frame = sum(
-        math.prod(dataset.shape[1:]) * dataset.dtype.itemsize
-        for dataset in datasets.values()
-    )
-    # Keep the working batch near 32 MiB (or one larger frame). Batched reads
-    # also handle previously recorded files with chunks spanning many frames.
-    batch_size = max(1, min(64, (32 * 1024**2) // max(1, bytes_per_frame)))
+    batch_size = 64
     for start in range(0, len(timestamps), batch_size):
         batch = {
             key: dataset[start : start + batch_size]
@@ -64,6 +66,51 @@ def _observations(group: h5py.Group, timestamps: np.ndarray) -> Iterator[Observa
             yield Observation(
                 float(timestamp), {key: values[offset] for key, values in batch.items()}
             )
+
+
+def _video_observations(path, manifest, group, timestamps):
+    """Reassemble observations without holding an episode's images in memory."""
+    deployment = episode_from_dict(manifest["spec"]).collection.deployment
+    expected = {camera.name for camera in deployment.cameras}
+    if set(manifest.get("camera_videos", {})) != expected:
+        raise ValueError("Camera video descriptors do not match deployment")
+    with ExitStack() as stack:
+        readers = {}
+        for camera in deployment.cameras:
+            descriptor = manifest["camera_videos"][camera.name]
+            relative = video_path(camera.name)
+            if (
+                descriptor.get("path") != relative
+                or descriptor.get("num_frames") != len(timestamps)
+                or descriptor.get("fps") != 1 / deployment.control_dt
+                or any(descriptor.get(k) != v for k, v in VIDEO_ENCODING.items())
+            ):
+                raise ValueError(f"Invalid camera video descriptor: {camera.name}")
+            file = path / relative
+            if not file.is_file() or sha256(file) != descriptor.get("sha256"):
+                raise ValueError(f"Missing or corrupted camera video: {camera.name}")
+            reader = stack.enter_context(imageio.get_reader(file, format="FFMPEG"))
+            metadata = reader.get_meta_data()
+            if metadata["size"] != (camera.width, camera.height) or not math.isclose(
+                metadata["fps"], descriptor["fps"], abs_tol=0.01
+            ):
+                raise ValueError(
+                    f"Camera video dimensions or frame rate disagree: {camera.name}"
+                )
+            readers[camera.name] = iter(reader)
+        for observation in _observations(group, timestamps):
+            values = dict(observation.values)
+            for name, reader in readers.items():
+                try:
+                    values[f"cameras/{name}/rgb"] = next(reader)
+                except StopIteration as error:
+                    raise ValueError(
+                        f"Camera video has too few frames: {name}"
+                    ) from error
+            yield Observation(observation.timestamp, values)
+        for name, reader in readers.items():
+            if next(reader, None) is not None:
+                raise ValueError(f"Camera video has too many frames: {name}")
 
 
 class EpisodeWriter:
@@ -76,6 +123,7 @@ class EpisodeWriter:
         self._state = "created"
         self._file = None
         self._events: list[Event] = []
+        self._videos: dict[str, CameraVideoWriter] = {}
         self.path = self.root / ".incomplete" / spec.id
         self.destination = self.root / "episodes" / spec.id
         if self.destination.exists():
@@ -130,12 +178,24 @@ class EpisodeWriter:
         dataset[index] = value
 
     def _frame(self, frame: Frame) -> None:
+        for camera in self.spec.collection.deployment.cameras:
+            if camera.name not in self._videos:
+                self._videos[camera.name] = CameraVideoWriter(
+                    self.path / video_path(camera.name),
+                    camera,
+                    self.spec.collection.deployment.control_dt,
+                )
+            self._videos[camera.name].append(
+                frame.observation.values[f"cameras/{camera.name}/rgb"]
+            )
         self._append("timestamps", np.float64(frame.observation.timestamp))
         for group, values in (
             ("observations", frame.observation.values),
             ("world_state", frame.world_state),
         ):
             for key, value in values.items():
+                if group == "observations" and key.endswith("/rgb"):
+                    continue
                 self._append(f"{group}/{key}", value)
 
     def begin(self, initial: Frame) -> None:
@@ -206,6 +266,18 @@ class EpisodeWriter:
             "events": self._events,
         }
         try:
+            for video in self._videos.values():
+                video.close()
+            manifest["camera_videos"] = {
+                camera.name: {
+                    "path": video_path(camera.name),
+                    "num_frames": self.steps + 1,
+                    "fps": 1 / self.spec.collection.deployment.control_dt,
+                    **VIDEO_ENCODING,
+                    "sha256": sha256(self.path / video_path(camera.name)),
+                }
+                for camera in self.spec.collection.deployment.cameras
+            }
             self._demo.attrs["num_samples"] = self.steps
             self._demo.attrs["success"] = outcome.code == "success"
             self._file.attrs["complete"] = True
@@ -252,6 +324,8 @@ class EpisodeWriter:
 
     def close(self) -> None:
         """Close resources without publishing; safe for interruption cleanup."""
+        for video in self._videos.values():
+            video.abort()
         if self._file is not None:
             try:
                 self._file.close()
@@ -328,7 +402,9 @@ def validate_episode(path: str | Path) -> dict[str, Any]:
         ):
             raise ValueError("Expected T+1 observations on the control time axis")
         obs = _datasets(demo["observations"])
-        if set(obs) != set(observation_shapes(deployment)):
+        if set(obs) != {
+            key for key in observation_shapes(deployment) if not key.endswith("/rgb")
+        }:
             raise ValueError("Recorded observations do not match deployment")
         for key, dataset in _datasets(demo).items():
             length = (
@@ -344,7 +420,9 @@ def validate_episode(path: str | Path) -> dict[str, Any]:
             for start in range(0, length, 64):
                 if not np.isfinite(dataset[start : start + 64]).all():
                     raise ValueError(f"Non-finite values in {key}")
-        for observation in _observations(demo["observations"], timestamps):
+        for observation in _video_observations(
+            path, manifest, demo["observations"], timestamps
+        ):
             observation.validate(deployment)
         for group in ("input_actions", "applied_control_targets"):
             datasets = _datasets(demo[group])
@@ -376,6 +454,7 @@ class EpisodeReader:
         self.spec = episode_from_dict(self.manifest["spec"])
         self._file = h5py.File(self.path / "trajectory.hdf5", "r")
         self._demo = self._file["data/demo_0"]
+        self._video_readers = {}
 
     def __len__(self) -> int:
         return self.manifest["num_steps"]
@@ -383,18 +462,27 @@ class EpisodeReader:
     def observation(self, step: int) -> Observation:
         if not 0 <= step <= len(self):
             raise IndexError(step)
-        return Observation(
-            float(self._demo["timestamps"][step]),
-            {
-                key: value[step]
-                for key, value in _datasets(self._demo["observations"]).items()
-            },
-        )
+        values = {
+            key: value[step]
+            for key, value in _datasets(self._demo["observations"]).items()
+        }
+        for camera in self.spec.collection.deployment.cameras:
+            if camera.name not in self._video_readers:
+                self._video_readers[camera.name] = imageio.get_reader(
+                    self.path / video_path(camera.name), format="FFMPEG"
+                )
+            values[f"cameras/{camera.name}/rgb"] = self._video_readers[
+                camera.name
+            ].get_data(step)
+        return Observation(float(self._demo["timestamps"][step]), values)
 
     def observations(self) -> Iterator[Observation]:
         """Iterate in control-time order with bounded batch reads for video export."""
-        yield from _observations(
-            self._demo["observations"], self._demo["timestamps"][:]
+        yield from _video_observations(
+            self.path,
+            self.manifest,
+            self._demo["observations"],
+            self._demo["timestamps"][:],
         )
 
     def world_state(self, step: int) -> dict[str, np.ndarray]:
@@ -417,6 +505,9 @@ class EpisodeReader:
         )
 
     def close(self):
+        for reader in self._video_readers.values():
+            reader.close()
+        self._video_readers.clear()
         self._file.close()
 
     def __enter__(self):
