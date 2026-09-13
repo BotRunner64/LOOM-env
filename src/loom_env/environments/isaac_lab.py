@@ -499,8 +499,6 @@ class ManipulationEnvironment(ManagerBasedEnv):
                 for name in (
                     "loom-env",
                     "isaaclab",
-                    "isaaclab-physx",
-                    "isaaclab-assets",
                     "isaacsim",
                     "torch",
                     "nvidia-curobo",

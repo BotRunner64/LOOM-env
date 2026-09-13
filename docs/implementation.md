@@ -51,6 +51,14 @@ python scripts/check_pick_place.py outputs/manipulation/episodes/place-demo \
   --output-dir outputs/manipulation-verification
 ```
 
+每条完整轨迹保存后，采集命令自动从已记录图像生成全部相机的横向拼接视频和首帧 PNG，无需另跑导出命令。例如上述放入任务输出：
+
+- 轨迹：`outputs/manipulation/episodes/place-demo/`
+- 视频：`outputs/manipulation/videos/place-demo.mp4`
+- 首帧：`outputs/manipulation/videos/place-demo.png`
+
+成功与完整保存的失败回合均生成视频；未提交的 `.incomplete/` 回合不生成视频，无相机配置只保存轨迹。每回合的 `RESULT` 同时打印任务结果、`episode_path`、`video_path` 与 `video_error`。视频编码失败保留轨迹、报告错误并继续后续回合，整个命令以非零状态退出。批量采集使用 `--episodes N`，回合 ID 自动追加 `-0000` 等序号，种子逐条递增。
+
 `--deployment` 和 `--scene` 分别覆盖 collection 中的本体部署和场景，可显式选择任务、本体与布局的组合；组合的物理可行性仍需验证，最终展开的配置写入 Episode。`--episodes` 连续运行同一 collection 的多次初始化，`--arm left` / `right` 选择操作臂；其他臂保持明确目标。任务和对象角色不参与场景构建。同一部署和 scene 可切换任务或角色；重放要求场景、部署和资产版本匹配，恢复已记录的物理状态。
 
 抓起任务要求整个目标离开支撑面至少配置的 `clearance`，并存在两指相向的实测接触。放入任务检查目标对象的位姿原点：转换到容器局部坐标系后，XY 必须位于容器资产包围范围内，Z 高于其底部且低于顶部加 `rim_tolerance`，并且两臂均没有夹持证据。当前 `rim_tolerance=0.01 m`，参考 RoboDojo 分类入篮任务的位置点判断和 1 cm 顶部余量；它不扩大 XY 范围。容器范围来自资产已有的 `bounds`，随容器实时位姿更新；不要求目标整个包围盒进入缩小的内框，因此允许靠壁放置。每个任务的这些条件必须同时连续满足 `hold_time`，当前配置为 0.25 秒，任一条件中断便重新计时。
@@ -59,15 +67,13 @@ python scripts/check_pick_place.py outputs/manipulation/episodes/place-demo \
 
 专家和 Policy 都实现 `ActionSource.reset/act`，接入同一个 Runner。专家显式获得仿真真值；Policy 观测只有机器人状态和相机图像。真实接触力按左右臂分别保存，碰撞附着只影响规划器，物体始终由 PhysX 计算运动。
 
-## 运动预览与视频
+## 运动预览
 
 ```bash
 python scripts/preview_motion.py --output-dir outputs/motion --episode-id panda-motion
-python scripts/export_video.py outputs/manipulation/episodes/place-demo \
-  outputs/manipulation/place-demo.mp4 --camera front left_wrist right_wrist
 ```
 
-运动预览使用相同资产与场景配置，通过低层 SimulationContext 做关节运动诊断，不运行抓取专家。`--deployment` 可切换已准备的其他双臂本体。预览保存的诊断状态不等于正式采集的可重放场景快照。
+运动预览使用相同资产与场景配置，通过低层 SimulationContext 做关节运动诊断，不运行抓取专家。`--deployment` 可切换已准备的其他双臂本体。预览也会直接生成三视角视频和首帧 PNG；保存的诊断状态不等于正式采集的可重放场景快照。
 
 ## Episode 协议
 

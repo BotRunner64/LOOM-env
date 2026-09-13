@@ -20,6 +20,7 @@ from pathlib import Path
 
 import numpy as np
 
+from loom_env.data.video import export_video
 from loom_env.scenes.workspace import sample_objects, dynamic_names
 from loom_env.assets.catalog import load_prepared, prepared_directory, sha256
 from loom_env.runtime.runner import EpisodeRunner
@@ -343,7 +344,6 @@ def main():
                 for name in (
                     "loom-env",
                     "isaaclab",
-                    "isaaclab-assets",
                     "isaacsim",
                     "torch",
                 )
@@ -364,8 +364,20 @@ def main():
         result = EpisodeRunner(PreviewEnvironment(), task, source).run(
             spec, args.output_dir
         )
+        video_path = None
+        video_error = None
+        if result.episode_path is not None and deployment.cameras:
+            video_path = args.output_dir / "videos" / f"{args.episode_id}.mp4"
+            try:
+                export_video(result.episode_path, video_path)
+            except Exception as error:
+                video_error = f"{type(error).__name__}: {error}"
+                video_path = None
+                traceback.print_exc()
         report = {
             "episode": str(result.episode_path),
+            "video": None if video_path is None else str(video_path),
+            "video_error": video_error,
             "outcome": result.outcome.code,
             "reason": result.outcome.reason,
             "steps": result.steps,
@@ -382,7 +394,7 @@ def main():
         if result.episode_path is None:
             raise RuntimeError(result.outcome.reason)
         print(f"MOTION_EPISODE_SAVED {result.episode_path}", flush=True)
-        if result.outcome.code != "success":
+        if result.outcome.code != "success" or video_error is not None:
             raise SystemExit(1)
     except BaseException:
         traceback.print_exc()

@@ -8,6 +8,7 @@ from pathlib import Path
 import traceback
 
 from loom_env.data.episodes import EpisodeReader
+from loom_env.data.video import export_video
 from loom_env.runtime.replay import (
     RecordedActions,
     ReplayComparison,
@@ -57,10 +58,21 @@ def main():
             ).run(spec, args.output_dir)
             report = comparison.report()
             report["result"] = plain(result)
+            report["video_path"] = None
+            report["video_error"] = None
+            if result.episode_path is not None and spec.collection.deployment.cameras:
+                video_path = args.output_dir / "videos" / f"{spec.id}.mp4"
+                try:
+                    export_video(result.episode_path, video_path)
+                    report["video_path"] = str(video_path)
+                except Exception as error:
+                    report["video_error"] = f"{type(error).__name__}: {error}"
+                    traceback.print_exc()
             report["outcome_matches"] = (
                 result.outcome.code == original.manifest["outcome"]["code"]
             )
             report["passed"] &= report["outcome_matches"]
+            report["passed"] &= report["video_error"] is None
             path = args.output_dir / f"{spec.id}-comparison.json"
             with path.open("x") as stream:
                 json.dump(report, stream, indent=2, default=str)

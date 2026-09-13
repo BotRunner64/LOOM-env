@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Collect physical manipulation episodes with the shared LOOM Runner."""
+"""Collect physical manipulation episodes and their camera videos."""
 
 import argparse
 from dataclasses import replace
@@ -52,6 +52,7 @@ def main():
     code = 0
     env = source = None
     try:
+        from loom_env.data.video import export_video
         from loom_env.runtime.build import create_environment, create_expert
         from loom_env.runtime.runner import EpisodeRunner
         from loom_env.tasks import create_task
@@ -69,8 +70,21 @@ def main():
                 provenance={"expert": type(source).__name__, "planner": "cuRobo"},
             )
             result = runner.run(spec, args.output_dir)
+            report = plain(result)
+            report["video_path"] = None
+            report["video_error"] = None
+            if result.episode_path is not None and collection.deployment.cameras:
+                video_path = args.output_dir / "videos" / f"{episode_id}.mp4"
+                try:
+                    export_video(result.episode_path, video_path)
+                    report["video_path"] = str(video_path)
+                except Exception as error:
+                    # Keep the committed trajectory and continue the next episode.
+                    report["video_error"] = f"{type(error).__name__}: {error}"
+                    traceback.print_exc()
+                    code = 1
             print(
-                "RESULT " + json.dumps(plain(result), ensure_ascii=False, default=str),
+                "RESULT " + json.dumps(report, ensure_ascii=False, default=str),
                 flush=True,
             )
             if result.outcome.code != "success":

@@ -1,6 +1,6 @@
 # 本体支持与资产准备
 
-任务和数据始终使用 `left`、`right`；每臂保留真实的 6／7 个机械臂关节，夹爪命令和物理关节分别描述。通过部署 YAML 切换本体，控制、重置、记录、视频导出及运动学检查使用同一套入口。
+任务和数据始终使用 `left`、`right`；每臂保留真实的 6／7 个机械臂关节，夹爪命令和物理关节分别描述。通过部署 YAML 切换本体，控制、重置、记录、视频自动生成及运动学检查使用同一套入口。
 
 | 部署文件（`configs/deployments/`） | 每臂关节 | 夹爪物理关节 | 夹爪命令 | 双臂动作维度 | 末端测量坐标系 |
 | --- | --- | --- | --- | --- | --- |
@@ -22,9 +22,9 @@ python scripts/prepare_planning.py yam x5 ur5_wsg xarm6_robotiq
 python scripts/collect.py --deployment configs/deployments/dual_x5.yaml \
   --scene configs/scenes/tabletop_near.yaml --arm right \
   --output-dir outputs/x5-pp-repeat --episode-id x5-pp --seed 0
-python scripts/export_video.py outputs/x5-pp-repeat/episodes/x5-pp \
-  outputs/x5-pp-repeat/views.mp4 --camera front left_wrist right_wrist
 ```
+
+采集同时生成 `outputs/x5-pp-repeat/videos/x5-pp.mp4` 和同名首帧 PNG，无需单独导出。
 
 `prepare_planning.py` 调用已安装 cuRobo 的 `RobotBuilder`，从 URDF 碰撞网格拟合球体；产物和拟合误差指标保存在 `.cache/assets/<model>/planning.json`。当前拟合器忽略 mesh 的 `scale`，因此脚本先在同目录的 `planning/` 中烘焙非单位缩放，再拟合；仿真 URDF 不变。URDF 改变时缓存被拒绝，需要重新生成。自碰撞排除只来自固定合并刚体、相邻刚体及已有物理排除组；不自动忽略初态碰撞或随机采样中未出现的碰撞。固定安装部位只在活动臂规划中豁免，另一臂及场景仍是障碍物。mimic 夹爪只锁定独立关节，保持规划与实际联动关系一致。
 
@@ -84,10 +84,6 @@ python scripts/preview_motion.py \
   --output-dir outputs/x5 \
   --episode-id x5-example-001
 
-python scripts/export_video.py \
-  outputs/x5/episodes/x5-example-001 outputs/x5/motion.mp4 \
-  --label 'Dual X5 motion test (no grasp)'
-
 python scripts/check_kinematics.py \
   outputs/x5/episodes/x5-example-001 --output outputs/x5/kinematics.json
 ```
@@ -135,12 +131,7 @@ xArm 的 `camera_link` 本身并非光学中心。[ManiSkill 固定版本配置]
 
 `focal_length` 与 `horizontal_aperture` 使用 mm，`clipping_range` 使用 m。全局相机焦距 22 mm、水平孔径 24 mm（水平视场约 57°），腕相机焦距 16 mm（约 74°），近裁剪距离 1 cm。实际内参写入 Episode 元数据；采样时相机世界位姿保存在真值 `cameras/<name>/pose_world`，与该相机 RGB 时间戳对应，不作为模型观测。
 
-目前模拟光学传感器；资产自带的相机／支架外观随资产保留，不额外增加外壳、支架质量或碰撞体。Panda、YAM 的显式安装是仿真方案；引用上游安装系也不表示已经完成实机安装标定。导出指定视角：
-
-```bash
-python scripts/export_video.py outputs/pick_place/episodes/panda-place \
-  outputs/pick_place/panda-left-wrist.mp4 --camera left_wrist
-```
+目前模拟光学传感器；资产自带的相机／支架外观随资产保留，不额外增加外壳、支架质量或碰撞体。Panda、YAM 的显式安装是仿真方案；引用上游安装系也不表示已经完成实机安装标定。采集和运动预览均自动生成包含全部已配置相机的视频。
 
 ### 检查相机挂载
 
@@ -156,9 +147,6 @@ for robot in piper x5 ur5_wsg xarm6_robotiq panda yam; do
   python scripts/check_kinematics.py \
     "$run_dir/$robot/episodes/$robot-mount" \
     --output "$run_dir/$robot/kinematics.json"
-  python scripts/export_video.py \
-    "$run_dir/$robot/episodes/$robot-mount" "$run_dir/$robot/motion.mp4" \
-    --camera front left_wrist right_wrist
 done
 ```
 
@@ -172,10 +160,9 @@ python scripts/collect.py \
   --scene configs/scenes/tabletop_compact.yaml --arm right \
   --output-dir outputs/camera-mounts-grasp-repeat \
   --episode-id piper-place-mount --seed 0
-python scripts/export_video.py \
-  outputs/camera-mounts-grasp-repeat/episodes/piper-place-mount \
-  outputs/camera-mounts-grasp-repeat/views.mp4 --camera front left_wrist right_wrist
 ```
+
+上述采集自动生成 `outputs/camera-mounts-grasp-repeat/videos/piper-place-mount.mp4`，用于检查三路视野。
 
 X5、YAM 的运动诊断初始姿态不面向桌面操作区，腕相机视野需要结合任务姿态检查。xArm 按官方光学旋转呈现画面，夹指出现在画面侧缘。
 
