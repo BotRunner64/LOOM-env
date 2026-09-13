@@ -86,7 +86,7 @@ def table_collision_parts(vertices, triangles, tabletop_bounds):
     return lower, slab
 
 
-def prepare_scene_assets(asset_root, source_root, repository):
+def prepare_scene_assets(asset_root, source_root):
     from pxr import Gf, Usd, UsdGeom, UsdPhysics
 
     for asset_id, definition in ASSETS.items():
@@ -102,15 +102,12 @@ def prepare_scene_assets(asset_root, source_root, repository):
             subprocess.run(
                 [
                     sys.executable,
-                    str(
-                        Path(repository)
-                        / ".deps/IsaacLab/scripts/tools/convert_mesh.py"
-                    ),
+                    "-m",
+                    "loom_env.assets.convert",
+                    "mesh",
                     str(source),
                     str(local),
                     "--headless",
-                    "--collision-approximation",
-                    "triangleMesh",
                 ],
                 check=True,
             )

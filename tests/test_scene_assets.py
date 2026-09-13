@@ -92,7 +92,7 @@ def test_usdz_reference_preserves_authored_physics(tmp_path, monkeypatch):
     )
     monkeypatch.setitem(ASSETS, "test:fixture", asset)
     monkeypatch.setattr(prepare, "ASSETS", {"test:fixture": asset})
-    prepare.prepare_scene_assets(tmp_path / "cache", tmp_path, tmp_path)
+    prepare.prepare_scene_assets(tmp_path / "cache", tmp_path)
     directory = prepared_directory(tmp_path / "cache", "test:fixture")
     result = Usd.Stage.Open(str(directory / "asset.usda"))
     original = Usd.Stage.Open(str(archive))

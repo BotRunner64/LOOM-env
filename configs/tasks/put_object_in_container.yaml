@@ -9,4 +9,5 @@ required_capabilities:
 parameters:
   hold_time: 0.25
   failure_drop: 0.15
-  containment_tolerance: 0.0005
+  # RoboDojo basket tasks allow the object position up to 1 cm above the rim.
+  rim_tolerance: 0.01

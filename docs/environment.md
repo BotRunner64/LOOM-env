@@ -13,7 +13,7 @@ conda create -n loom-env python=3.12 'pip>=25.1'
 conda activate loom-env
 ```
 
-已有同名环境时先检查其安装来源。旧环境曾使用 `.deps/IsaacLab` 的五个 editable 子包和手动补丁；验证新安装方案应创建独立环境，避免这些旧包掩盖缺失依赖或覆盖官方 wheel 的模块。
+已有同名环境时先检查安装来源，避免源码 editable 子包覆盖官方 wheel 的模块。
 
 ## 安装依赖
 
@@ -82,30 +82,21 @@ export VK_ICD_FILENAMES=/etc/vulkan/icd.d/nvidia_icd.json
 - cuRobo 小网格检查失败：核对是否安装了项目声明的上游提交，不能仅看 `0.8.0` 版本前缀。
 - 仿真启动失败：查看 `simulation.log`，检查 GPU、Vulkan ICD 和 EULA 设置；首次 RTX 着色器编译可能较慢。
 
-## 验证记录
+## 资产转换
 
-2026-09-13：移除项目对普通依赖的精确版本锁定，并用 NVIDIA 官方 Lab wheel 和包含碰撞修复的上游 cuRobo 验证无补丁安装。验证产物位于 `.cache/setup/no-patches/`，不提交 Git。
+机器人与场景准备统一通过 `python -m loom_env.assets.convert` 调用已安装 Lab 的转换 API。该模块只负责在独立仿真进程中转换，资产校验和发布仍由 `scripts/prepare_assets.py` 完成。URDF 保留原固定基座、合并固定关节和关节驱动参数；桌面保留三角网格转换设置。
 
-验证使用 `.cache/setup/no-patches/wheel-venv`，复用原环境的 Sim / GPU 运行库，独立安装官方 Lab wheel 和原版 cuRobo；已核对所有 Lab 子模块均来自 wheel，未加载旧 editable 源码。原 Conda 环境未迁移，此次也不等同于从空机器完成全部下载的验证。
-
-实际组合为 Sim 6.0.1.0、Lab 3.0.0b2.post1、PyTorch 2.11.0+cu128、cuRobo 0.8.0.post1.dev43。它们是本次验证记录，不是项目新增的精确版本约束。
-
-- 标准完整 pip 安装成功，报告：`install-plan.json`，日志：`full-install.log`。
-- 依赖范围、`pip check`、数据读写、CUDA、cuRobo 正向运动学和梯度全部通过，报告：`final-checks/report.json`。
-- 小网格远处碰撞代价为 0，近处为约 0.0075，梯度有限。
-- GPU PhysX 方块落地中心高度为 0.0500 m，RTX 输出有效的 64×64 RGB；图像：`wheel-sim/simulation-rgb.png`，日志：`wheel-sim.log`。
-- 148 项项目测试通过，Ruff 和文档命令语法检查通过。
-
-默认 Panda 抓放（`configs/collection/pick_place.yaml`、seed 0）在原环境和无补丁环境中均执行 500 步后超时，物体落在篮子外；无补丁轨迹的数据结构检查通过。该案例未通过任务验收，不能把环境检查通过解释为抓放成功。两次物体位置轨迹最大分量差约 0.053 m，单次对照也不能证明新旧环境物理效果等价。对照报告为 `task-comparison.json`，运行日志为 `baseline.log` 和 `collection.log`，最终图像为 `panda-final.png`。
-
-复现本次无补丁抓放检查（仓库根目录，先设置上文 EULA / Vulkan 变量）：
+在仓库根目录、激活完整仿真环境并设置上文 EULA / Vulkan 变量后，可用已准备的 Piper URDF 和共享桌面源文件检查转换，不覆盖正式资产：
 
 ```bash
-.cache/setup/no-patches/wheel-venv/bin/python scripts/collect.py \
-    --collection configs/collection/pick_place.yaml \
-    --output-dir outputs/environment-validation --episode-id panda-no-patches --seed 0
+python -m loom_env.assets.convert urdf .cache/assets/piper/piper.urdf \
+    .cache/checks/conversion/piper-usd --fix-base --merge-joints \
+    --joint-stiffness 400 --joint-damping 40 --headless
+python -m loom_env.assets.convert mesh \
+    /inspire/hdd/global_user/czxs253130598/projects/sim_projects/ManiSkill/mani_skill/utils/scene_builder/table/assets/table.glb \
+    .cache/checks/conversion/table.usd --headless
 ```
 
-该命令使用本机保留的验证环境；新机器完成上文正式安装后使用 `python`。重复运行时更换 episode ID 或输出目录。成功与否以 `RESULT` 的 `outcome` 和实际轨迹为准。
+首次使用应先按[机器人说明](embodiments.md#准备并运行)准备 Piper，并按[场景资产说明](scene-assets.md)取得桌面源文件；其他节点替换共享路径。成功时输出 `ASSET_CONVERTED`，结果分别为 `piper-usd/piper/piper.usda` 和 `table.usd`。缺少输入文件时直接报错；仿真启动问题按上文排查。
 
-历史上 2026-09-08 的 Sim 6.0.1 / Lab 源码标签组合通过了 GPU PhysX 和 RTX 相机检查，但带有本地补丁；这份历史结果不替代当前无补丁组合的验证。
+迁移后正式环境的依赖检查、数据读写、CUDA、cuRobo 正向运动学／梯度、小网格碰撞和 GPU PhysX／RTX 检查全部通过，报告为 `.cache/checks/environment-migration/checks/report.json`，渲染图像为同目录 `simulation-rgb.png`。复现：仓库根目录激活 `loom-env` 并设置上文 EULA／Vulkan 变量后，执行 `python scripts/check_env.py --curobo --sim --output-dir .cache/checks/environment-migration/checks`；各项 `passed` 应为 `true`。该检查不替代抓放任务效果验收。

@@ -17,11 +17,9 @@ flowchart LR
 
 ## 当前进度
 
-截至 2026-09-13：
-
 - **已具备：** 三类配置与角色绑定、统一执行循环、抓起和放入任务、三路相机记录与重放入口。
-- **已验证：** 六类双臂在各自指定布局下的右臂抓放；[具体范围与视频](docs/embodiments.md#抓放录制)。
-- **尚缺：** 固定另外两项、只换任务／场景／部署的系统验收。已有跨本体测试同时调整了布局。
+- **本体支持：** 六类双臂部署及对应布局；见[本体说明](docs/embodiments.md#抓放录制)。
+- **尚缺：** 固定另外两项、只换任务／场景／部署的系统验收。不同本体可能需要调整布局。
 - **下一步：** 清理现有职责耦合 → 整理一个完整案例 → 逐项切换并验收。Context 配对与模型对照在此之后。
 
 ## 开发入口
@@ -29,4 +27,4 @@ flowchart LR
 - [架构](docs/architecture.md)：职责、执行流程、代码位置。
 - [运行](docs/implementation.md)：配置、采集、重放、数据检查；首次使用先[安装环境](docs/environment.md)。
 - 扩展：[机器人](docs/embodiments.md) · [场景资产](docs/scene-assets.md)。
-- 排查：[历史验证记录](docs/validation.md)；协作约定：[AGENTS.md](AGENTS.md)。
+- 排查：[运行排查](docs/implementation.md#如何判断与排查)；协作约定：[AGENTS.md](AGENTS.md)。

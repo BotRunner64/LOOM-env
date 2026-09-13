@@ -191,7 +191,7 @@ def main():
             parser.error("scene requires --source-root pointing to sim_projects")
         from loom_env.assets.prepare import prepare_scene_assets
 
-        prepare_scene_assets(root, args.source_root, ROOT)
+        prepare_scene_assets(root, args.source_root)
     names = []
     for choice in args.models:
         if choice == "scene":
@@ -207,7 +207,6 @@ def main():
         )
     for name in names:
         changes = normalize_urdf(root, name)
-        converter = ROOT / ".deps/IsaacLab/scripts/tools/convert_urdf.py"
         with tempfile.TemporaryDirectory(
             prefix=f"{name}-convert-", dir=root
         ) as scratch:
@@ -215,7 +214,9 @@ def main():
             subprocess.run(
                 [
                     sys.executable,
-                    str(converter),
+                    "-m",
+                    "loom_env.assets.convert",
+                    "urdf",
                     str(prepared_urdf(root, name)),
                     str(converted),
                     *CONVERSION_ARGS,

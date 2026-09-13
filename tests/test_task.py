@@ -22,40 +22,43 @@ def test_success_requires_continuous_release(spec, frame_factory):
     assert task.update(free, 0.05).outcome.code == "success"
 
 
-@pytest.mark.parametrize("condition", ["protruding", "other_arm_grasp"])
-def test_false_positive_placements_are_rejected(spec, frame_factory, condition):
+@pytest.mark.parametrize("side", [0, 1])
+def test_held_object_is_not_placed(spec, frame_factory, side):
     task = PlaceTask(spec.collection)
-    world = {
-        key: value.copy() for key, value in frame_factory(spec).world_state.items()
-    }
-    if condition == "protruding":
-        world["cube/pose_world"][0] += 0.08  # Centre inside, corner outside.
-    else:
-        world["cube/grasped_by"][1] = True
+    world = {k: v.copy() for k, v in frame_factory(spec).world_state.items()}
+    world["cube/grasped_by"][side] = True
     task.reset(world)
-    for _ in range(10):
-        assert task.update(world, 0.05).outcome is None
+    assert task.update(world, 0.5).outcome is None
 
 
-def test_rotation_aware_containment(spec, frame_factory, monkeypatch):
-    from loom_env.assets.catalog import ASSETS
-
-    container = ASSETS["robodojo:basket"]
-    monkeypatch.setitem(
-        ASSETS,
-        "robodojo:basket",
-        replace(container, interior=(container.interior[0], (0.07, 0.04, 0.055))),
-    )
+def test_position_inside_accepts_corners_outside_and_object_rotation(
+    spec, frame_factory
+):
     task = PlaceTask(spec.collection)
     world = {
-        key: value.copy() for key, value in frame_factory(spec).world_state.items()
+        k: v.copy()
+        for k, v in frame_factory(spec, position=(0.62, 0.07, 0.8)).world_state.items()
     }
     task.reset(world)
     assert task.update(world, 0.25).outcome.code == "success"
-    # The object does not fit across this test region's narrow axis.
     world["cube/pose_world"][3:] = Rotation.from_euler("z", 90, degrees=True).as_quat()
+    assert task.update(world, 0.25).outcome.code == "success"
+
+
+def test_containment_follows_container_rotation(spec, frame_factory):
+    task = PlaceTask(spec.collection)
+    world = {
+        k: v.copy()
+        for k, v in frame_factory(spec, position=(0.61, 0.0, 0.8)).world_state.items()
+    }
+    task.reset(world)
+    assert task.update(world, 0.25).outcome.code == "success"
+    # Rotating the basket puts the same point outside its narrower local y axis.
+    world["container/pose_world"][3:] = Rotation.from_euler(
+        "z", 90, degrees=True
+    ).as_quat()
     assert task.update(world, 0.25).outcome is None
-    world["container/region_pose_world"][3:] = world["cube/pose_world"][3:]
+    world["cube/pose_world"][:2] = [0.5, 0.11]
     assert task.update(world, 0.25).outcome.code == "success"
 
 
@@ -72,16 +75,31 @@ def test_dropped_object_and_bad_truth(spec, frame_factory):
         task.reset(bad)
 
 
-def test_contact_tolerance_does_not_accept_protrusion(spec, frame_factory):
+@pytest.mark.parametrize(
+    "axis, boundary, offset, succeeds",
+    [
+        (0, "upper", -0.001, True),
+        (0, "upper", 0.001, False),
+        (0, "lower", -0.001, False),
+        (1, "upper", 0.001, False),
+        (1, "lower", -0.001, False),
+        (2, "upper", 0.009, True),
+        (2, "upper", 0.011, False),
+        (2, "lower", -0.001, False),
+    ],
+)
+def test_container_position_boundaries(
+    spec, frame_factory, axis, boundary, offset, succeeds
+):
     task = PlaceTask(spec.collection)
-    # Allow submillimetre contact penetration of the conservative envelope.
-    # A corner protruding beyond the configured tolerance remains a failure.
-    numerical = frame_factory(spec, position=(0.57024, 0.0, 0.8)).world_state
-    task.reset(numerical)
-    assert task.update(numerical, 0.25).outcome.code == "success"
-    protruding = frame_factory(spec, position=(0.57044, 0.0, 0.8)).world_state
-    task.reset(protruding)
-    assert task.update(protruding, 0.25).outcome is None
+    world = {k: v.copy() for k, v in frame_factory(spec).world_state.items()}
+    lower, upper = task.container_bounds
+    local = np.zeros(3)
+    local[axis] = (upper if boundary == "upper" else lower)[axis] + offset
+    world["cube/pose_world"][:3] = world["container/pose_world"][:3] + local
+    task.reset(world)
+    outcome = task.update(world, 0.25).outcome
+    assert (outcome is not None and outcome.code == "success") == succeeds
 
 
 def test_success_respects_object_and_container_binding(collection, frame_factory, spec):
@@ -96,11 +114,11 @@ def test_success_respects_object_and_container_binding(collection, frame_factory
     world["cube/pose_world"][:3] = [0.38, -0.10, 0.75]
     for key in ("pose_world", "velocity_world", "grasped_by"):
         world[f"other/{key}"] = world[f"cube/{key}"].copy()
-    world["other_container/region_pose_world"] = np.array([0.6, 0.2, 0.8, 0, 0, 0, 1])
+    world["other_container/pose_world"] = np.array([0.6, 0.2, 0.8, 0, 0, 0, 1])
     world["other/pose_world"][:3] = world["container/region_pose_world"][:3]
     task.reset(world)
     assert task.update(world, 0.25).outcome is None
-    world["cube/pose_world"][:3] = world["other_container/region_pose_world"][:3]
+    world["cube/pose_world"][:3] = world["other_container/pose_world"][:3]
     assert task.update(world, 0.25).outcome is None
     world["cube/pose_world"][:3] = world["container/region_pose_world"][:3]
     assert task.update(world, 0.25).outcome.code == "success"
@@ -159,11 +177,11 @@ def test_place_requires_continuous_containment_in_moving_container(spec, frame_f
     world["cube/velocity_world"][0] = 0.1
     task.reset(world)
     assert task.update(world, 0.20).outcome is None
-    world["container/region_pose_world"][0] += 0.3
+    world["container/pose_world"][0] += 0.3
     assert task.update(world, 0.05).outcome is None  # Leaving resets the timer.
     world["cube/pose_world"][0] += 0.3
     for _ in range(4):
-        world["container/region_pose_world"][0] += 0.005
+        world["container/pose_world"][0] += 0.005
         world["cube/pose_world"][0] += 0.005
         assert task.update(world, 0.05).outcome is None
     assert task.update(world, 0.05).outcome.code == "success"

@@ -41,7 +41,6 @@ namespaces = false
 [tool.ruff]
 target-version = "py312"
 line-length = 88
-extend-exclude = [".deps"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
