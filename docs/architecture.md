@@ -48,4 +48,4 @@ flowchart LR
 | 组件组装、执行循环 | `runtime/build.py`、`runtime/runner.py`；接口在 `runtime/protocols.py` |
 | 轨迹读写与校验 | `data/`，可独立于仿真使用 |
 
-命令入口在 `scripts/`，依赖在 `pyproject.toml`。当前优先检查 `runtime/build.py` 中对抓放角色的假设，以及部署与本体定义的重复；进度统一见 [README](../README.md#当前进度)。
+命令入口在 `scripts/`，依赖在 `pyproject.toml`。随[任务与场景拓展](expansion-plan.md)检查 `runtime/build.py` 中对抓放角色的假设，以及部署与本体定义的重复，按具体案例需要整理；进度统一见 [README](../README.md#当前进度)。
