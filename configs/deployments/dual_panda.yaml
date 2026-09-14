@@ -4,7 +4,7 @@ id: dual_panda_tabletop
 control_type: joint_position
 control_dt: 0.05
 physics_dt: 0.008333333333333333
-capabilities: [grasp, place]
+capabilities: [grasp, place, push]
 arms:
   left:
     asset: &asset isaaclab_assets.robots.franka:FRANKA_PANDA_CFG

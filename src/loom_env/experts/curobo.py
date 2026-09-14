@@ -213,3 +213,63 @@ class ArmPlanner:
             "target_contact_allowed": allow_object_contact,
             "time_scale": 2.0,
         }
+
+    def cartesian_step(self, observation, truth, goal_world):
+        """Small damped-Jacobian step for contact; validate sampled joint motion.
+
+        The target remains a free PhysX body. Only its planning obstacle is
+        disabled; table, other objects, held arm, and self collision remain.
+        """
+        if not hasattr(self, "servo_model"):
+            self.servo_model = Kinematics(
+                self.planner.kinematics.config, compute_jacobian=True
+            )
+        self.update_world(observation, truth, allow_object_contact=True)
+        q = np.asarray(observation.values[f"robot/{self.side}/joint_position"])
+        measured = np.asarray(observation.values[f"robot/{self.side}/tcp_pose_world"])
+        local_measured, local_goal = (
+            self._local_pose(measured),
+            self._local_pose(goal_world),
+        )
+        delta_position = local_goal[:3] - local_measured[:3]
+        delta_rotation = (
+            Rotation.from_quat(local_goal[3:])
+            * Rotation.from_quat(local_measured[3:]).inv()
+        ).as_rotvec()
+        if (
+            np.linalg.norm(delta_position) > 0.02
+            or np.linalg.norm(delta_rotation) > 0.15
+        ):
+            raise SourceFailure(
+                "Contact Cartesian reference exceeded tracking tolerance", kind="skill"
+            )
+        state = self.servo_model.compute_kinematics(self._state(q))
+        index = state.tool_frames.index(self.arm.tcp_frame)
+        jacobian = state.tool_jacobians[0, 0, index].detach().cpu().numpy()
+        error = np.r_[delta_position, delta_rotation]
+        dq = jacobian.T @ np.linalg.solve(
+            jacobian @ jacobian.T + 0.0004 * np.eye(6), error
+        )
+        dq *= min(
+            1.0, 0.4 * self.deployment.control_dt / max(np.max(np.abs(dq)), 1e-12)
+        )
+        target = q + dq
+        bounds = np.asarray(self.arm.joint_limits)
+        if np.any(target < bounds[:, 0]) or np.any(target > bounds[:, 1]):
+            raise SourceFailure("Contact step exceeds joint limits", kind="planning")
+        samples = q[None, None] + np.linspace(0, 1, 3)[None, :, None] * dq
+        rollout = self.planner.ik_solver.auxiliary_rollout
+        joint_state = JointState.from_position(
+            torch.tensor(samples, device="cuda:0", dtype=torch.float32),
+            joint_names=list(self.arm.joint_names),
+        )
+        robot_state = rollout.metrics_transition_model.compute_augmented_state(
+            joint_state
+        )
+        metrics = rollout.compute_metrics_from_state(robot_state)
+        feasible = metrics.costs_and_constraints.get_feasible(include_all_hybrid=False)
+        if not bool(torch.as_tensor(feasible).all().item()):
+            raise SourceFailure(
+                "Contact step violates cuRobo collision constraints", kind="planning"
+            )
+        return target

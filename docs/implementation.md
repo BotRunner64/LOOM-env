@@ -90,6 +90,69 @@ python scripts/check_pick_place.py outputs/manipulation/episodes/place-demo \
 
 专家和 Policy 都实现 `ActionSource.reset/act`，接入同一个 Runner。专家显式获得仿真真值；Policy 观测只有机器人状态和相机图像。真实接触力按左右臂分别保存，碰撞附着只影响规划器，物体始终由 PhysX 计算运动。
 
+## 直推积木
+
+首个非抓持操作案例使用 Panda 闭合夹爪从侧面推动原 RoboDojo 积木到目标位置，目标朝向为 0°；已验证固定初态及初始偏转纠正。仅需默认木桌与积木资产；准备方式沿用本文“运行前”和“资产准备”，无需下载新模型。以下命令从仓库根目录、激活完整 `loom-env` 环境并完成 GPU／EULA 配置后执行，轨迹采集在沙箱外运行：
+
+```bash
+python scripts/inspect_data.py config configs/collection/push.yaml
+python scripts/collect.py --collection configs/collection/push.yaml \
+  --output-dir outputs/push --episode-id push-demo --seed 0
+python scripts/inspect_data.py episode outputs/push/episodes/push-demo
+python scripts/replay_episode.py outputs/push/episodes/push-demo \
+  --output-dir outputs/push-replay
+```
+
+重复运行需更换回合 ID 和重放目录。期望采集输出 `outcome.code=success`、`video_error=null`，原因是 `object_pushed_to_pose_and_released`；重放输出 `passed=true`。轨迹在 `outputs/push/episodes/push-demo/`，三视角拼接视频在 `outputs/push/videos/push-demo.mp4`。离线检查命令同时输出 `push_metrics`，包含最终位置／朝向误差、最低点离桌范围、夹持与接触样本数。
+
+配置与行为：
+
+- 场景为 [`tabletop_push.yaml`](../configs/scenes/tabletop_push.yaml)，只含木桌和积木。积木初态位于工作区局部 `(-0.05, -0.10)` m；默认固定初态，不因更换 seed 自动改变布局。
+- 目标在 [`push_object.yaml`](../configs/tasks/push_object.yaml) 单处定义：`target_position` 是积木位姿原点的工作区局部 XY，`target_yaw` 是相对工作区的绕 Z 轴角度，单位 rad。默认目标为 `(0.05, -0.10)` m、0 rad，对应世界 XY `(0.50, -0.10)` m，要求约 10 cm 平移。
+- 专家先闭合夹爪，再用 cuRobo 接近和下降；接触段用实测关节与末端位姿反馈，以约 2 cm/s 沿初始目标方向推进；根据积木的实测侧向位置误差，以 0.5 s⁻¹ 比例、最高 5 mm/s 修正夹爪的侧向运动。夹爪朝向在该次推动中固定，积木转正依靠接触产生的力矩，尚无目标朝向反馈控制。小步关节变化上限为 0.4 rad/s，检查起点、中点和终点的规划碰撞约束。允许目标物接触，桌子、其他物体、另一臂及自碰撞检查继续保留；积木始终由 PhysX 计算运动。
+- 成功要求位置误差不超过 1 cm、完整姿态误差不超过 5°，曾出现实测接触，随后无夹持且无推动接触，连续满足 0.25 秒。实测滑动推力约 0.17 N，接触阈值使用 0.02 N；不得沿用抓持检测的 0.2 N 阈值来判断是否退离。
+- 记录期间任何采样帧出现夹持、积木最低包围点高于桌面 5 mm 或低于桌面 5 mm，立即失败；初始已在目标附近也不接受。检查频率为 20 Hz，不保证捕获两个控制帧之间的瞬时抬升。判据不使用速度门槛。
+
+当前只验收 Panda 右臂和这块积木的直推，不具备主动转向、绕障或通用不规则物体推移能力。目标数值随 Episode 配置保存，原始相机视频不额外绘制目标标记；验收对照图可以添加目标轮廓，但这不是训练相机图像。场景初态变化使用已有 `position_min`／`position_max` 或显式场景配置，不修改任务判据。
+
+固定初态验收：212 个控制步，实际平移约 98.96 mm，最终位置误差 1.09 mm、姿态误差 0.49°；20 Hz 记录中无夹持，最低包围点相对桌面为 -0.16 至 -0.14 mm。接触持续到第 207 帧，第 208–212 帧无推动接触后成功。视频位于 `outputs/push-development/run3/videos/push-seed0.mp4`，测量与目标轮廓对照位于 `outputs/push-development/` 下的 `run3-analysis.json`、`run3-analysis-keyframes.jpg`。
+
+位置变体验收使用 [`tabletop_push_varied.yaml`](../configs/scenes/tabletop_push_varied.yaml)，仅将积木初态采样范围改为 X ±1 cm、Y ±5 mm；目标、朝向和成功标准保持相同。在上述环境与资产就绪后，从仓库根目录运行：
+
+```bash
+python scripts/collect.py --collection configs/collection/push.yaml \
+  --scene configs/scenes/tabletop_push_varied.yaml \
+  --output-dir outputs/push-varied --episode-id push-varied --seed 0 --episodes 3
+python scripts/inspect_data.py index outputs/push-varied \
+  --output outputs/push-varied/index.jsonl
+```
+
+固定初态与 seed 0–2 的三个位置变体均通过当前判据和视频完整性校验，最终位置误差为 1.09–2.05 mm、姿态误差为 0.49–2.45°；固定案例物理重放通过，积木最大位置差约 0.006 mm。汇总位于 `outputs/push-development/summary.json`，视频和失败记录说明见该目录的 `README.md`。这只覆盖当前四个案例，不代表整个采样范围、其他本体或主动转向已验收。测试为 178 项通过（含真实 GPU 接触步进与碰撞拒绝），Ruff 检查通过。
+
+朝向变体使用 [`tabletop_push_yaw_positive.yaml`](../configs/scenes/tabletop_push_yaw_positive.yaml)（初始 +20°）和 [`tabletop_push_yaw_negative.yaml`](../configs/scenes/tabletop_push_yaw_negative.yaml)（初始 −20°）。目标仍为原位置、0°，位置与朝向容差保持不变。沿用本节运行环境，在仓库根目录执行：
+
+```bash
+for sign in positive negative; do
+  python scripts/collect.py --collection configs/collection/push.yaml \
+    --scene configs/scenes/tabletop_push_yaw_${sign}.yaml \
+    --output-dir outputs/push-yaw --episode-id yaw-${sign} --seed 0
+  python scripts/inspect_data.py episode outputs/push-yaw/episodes/yaw-${sign}
+done
+```
+
+两例均期望 `success`、`video_error=null`；视频在 `outputs/push-yaw/videos/`。本次验收及失败对照保存在 `outputs/push-orientation/`：
+
+| 控制与初态 | 结果 | 最终位置误差 | 最终朝向误差 |
+| --- | --- | --- | --- |
+| 原直推，+10° / −10° | 均成功 | 5.42 / 4.57 mm | 0.31 / 1.33° |
+| 原直推，+20° / −20° | 均因侧向偏移失败 | 10.72 / 10.48 mm | 0.06 / 1.39° |
+| 加入侧向修正，+20° / −20° | 均成功，215 步 | 1.60 / 1.67 mm | 0.05 / 1.43° |
+| 原直推，初始 0°、目标 +10° | 300 步超时 | 1.09 mm | 10.49° |
+
+修正后的两例均在第 211–215 帧退离接触后成功；20 Hz 记录中无夹持，积木最低点相对桌面在 −0.22 至 −0.14 mm。证据包括 `corrected/videos/yaw-plus20.mp4`、`corrected/videos/yaw-minus20.mp4` 及目录下 `corrected-*-keyframes.jpg`、`corrected-*.json`。新增侧向反馈后，基础直推回归成功（位置误差 1.05 mm、朝向误差 0.48°）；+20° 物理重放通过，物体最大位置差 0.029 mm、角度差 0.065°。本轮 8 回合离线判据复核与记录结果一致，推动判据测试 8 项和控制器 Ruff 检查通过。这些是固定初态的少量验证，不代表连续角度范围、位置与朝向联合随机化或其他物体已通过。初始纠偏成功也不代表能够到达任意目标朝向；下一步需围绕接触方向／作用点设计主动转向，并继续同时检查位置误差。
+
+实现入口为 [`tasks/push.py`](../src/loom_env/tasks/push.py)、[`experts/push.py`](../src/loom_env/experts/push.py) 和 [`experts/curobo.py`](../src/loom_env/experts/curobo.py) 的 `cartesian_step`。失败时先检查 Episode 结果、阶段事件和腕部视频：区分未接触、侧向偏离、跟踪误差、碰撞约束拒绝及任务判据失败；保留失败回合，不修改物体摩擦或碰撞来掩盖问题。
+
 ## 运动预览
 
 ```bash

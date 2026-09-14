@@ -1,9 +1,14 @@
 """Explicit assembly shared by collection, replay, and physical validation."""
 
 from loom_env.experts.pick_place import LiftExpert, PickPlaceExpert
+from loom_env.experts.push import PushExpert
 from loom_env.tasks import create_task
 
-EXPERTS = {"put_object_in_container": PickPlaceExpert, "lift_object": LiftExpert}
+EXPERTS = {
+    "put_object_in_container": PickPlaceExpert,
+    "lift_object": LiftExpert,
+    "push_object": PushExpert,
+}
 
 
 def create_environment(collection, asset_root):

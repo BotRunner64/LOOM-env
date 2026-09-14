@@ -54,6 +54,33 @@ def main():
                     "camera_videos",
                 )
             }
+            if manifest["spec"]["collection"]["task"]["id"] == "push_object":
+                import math
+
+                from loom_env.data.episodes import EpisodeReader
+                from loom_env.tasks.push import PushTask
+
+                with EpisodeReader(args.path) as reader:
+                    task = PushTask(reader.spec.collection)
+                    samples = [
+                        task.metrics(reader.world_state(k))
+                        for k in range(len(reader) + 1)
+                    ]
+                    result["push_metrics"] = {
+                        "target_pose_world": task.target_pose.tolist(),
+                        "final_position_error_m": samples[-1]["position_error"],
+                        "final_angle_error_deg": math.degrees(
+                            samples[-1]["angle_error"]
+                        ),
+                        "max_clearance_m": max(m["clearance"] for m in samples),
+                        "min_clearance_m": min(m["clearance"] for m in samples),
+                        "grasped_samples": sum(m["grasped"] for m in samples),
+                        "contact_samples": sum(
+                            m["contact_force"] > task.parameters["contact_force"]
+                            for m in samples
+                        ),
+                        "sample_period_s": reader.spec.collection.deployment.control_dt,
+                    }
         else:
             result = {
                 "episodes": build_index(args.root, args.output),

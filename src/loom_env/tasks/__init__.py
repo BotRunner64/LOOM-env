@@ -2,8 +2,13 @@
 
 from .lift import LiftTask
 from .place import PlaceTask
+from .push import PushTask
 
-TASKS = {"put_object_in_container": PlaceTask, "lift_object": LiftTask}
+TASKS = {
+    "put_object_in_container": PlaceTask,
+    "lift_object": LiftTask,
+    "push_object": PushTask,
+}
 
 
 def create_task(collection):

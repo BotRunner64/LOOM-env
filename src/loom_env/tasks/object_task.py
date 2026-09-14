@@ -13,7 +13,7 @@ from loom_env.specs.episode import Outcome, TaskStatus
 
 
 class ObjectTask:
-    def __init__(self, collection, extra_parameters=()):
+    def __init__(self, collection, extra_parameters=(), structured_parameters=()):
         self.object_name = collection.role_bindings["target_object"]
         obj = collection.scene.objects[self.object_name]
         if obj["static"]:
@@ -26,6 +26,7 @@ class ObjectTask:
             "hold_time",
             "failure_drop",
             *extra_parameters,
+            *structured_parameters,
         }
         if set(parameters) != required:
             raise ValueError(f"Task parameters must be exactly {sorted(required)}")
@@ -34,7 +35,8 @@ class ObjectTask:
             or isinstance(v, bool)
             or not math.isfinite(v)
             or v <= 0
-            for v in parameters.values()
+            for key, v in parameters.items()
+            if key not in structured_parameters
         ):
             raise ValueError("Task thresholds must be finite and positive")
         self.parameters = parameters
