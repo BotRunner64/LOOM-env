@@ -40,6 +40,83 @@ RoboDojo USDZ 按字节复制后直接引用，保留刚体层级、凸分解／
 
 当前工作区限定为水平平面，采样只覆盖受支撑且彼此分离的物体。关节物体、堆叠初态、非矩形功能区域需要对应的新物理状态和判据，应在具体任务要求出现时实现。
 
+## 本地复用的 RoboDojo 源模型
+
+从共享 `sim_projects/RoboDojo/Assets/Object/RoboDojo/` 批量复制桌面物体到 `.cache/assets/robodojo/`，保留各模型的 USDZ、元数据、描述及配套文件。源版本为 `RoboDojo-Benchmark/RoboDojo` 的 `a14409d7fae673c00499e01fd88b4457df6351b1`；共享源文件保持原样。
+
+这是覆盖大量类别与款式的物体库，不再逐个手选少量样例。复制范围和筛选条件只在 [`scripts/copy_robodojo_assets.py`](../scripts/copy_robodojo_assets.py) 中维护：
+
+- 包含 `Rigid` 普通物体、`Geometry` 容器和功能物体、`Clutter` 日用品及场景物体，保留符合条件的全部款式。
+- 源元数据的最长边不超过 50 cm；已声明的质量须为正且不超过 3 kg，未声明质量的模型保留并在清单中记录为空。
+- 缺少 `object.usdz`、尺寸无效、明显过大或质量不合要求的模型列入清单的 `excluded`，附原因。关节物体、衣物、液体和输送带不在当前刚体桌面资产集合内。
+
+在仓库根目录、激活完整仿真环境后执行，无需网络或 GPU：
+
+```bash
+conda activate loom-env
+python scripts/copy_robodojo_assets.py
+```
+
+默认从本机共享目录读取，可用 `--source-root` 替换源路径、`--output-dir` 替换目标缓存、`--workers` 调整复制并发数（默认 4）。需要约 12 GiB 可用空间。重跑会核对已有文件并继续复制，不覆盖内容不同的目标文件；文件先写临时路径，哈希一致后才替换。
+
+`.cache/assets/robodojo/manifest.json` 保存源版本、模型路径、尺寸／质量、逐文件 SHA-256、排除原因、复制失败及依赖检查结果。命令结束打印数量、大小、失败数和清单路径；退出码 0 表示复制和依赖检查全部通过，非零时先看 `failures` 及各模型的 `dependency_check`。可以直接查看本地清单与模型：
+
+```bash
+python -m json.tool .cache/assets/robodojo/manifest.json
+# 示例：.cache/assets/robodojo/Rigid/toy_car/00001/object.usdz
+```
+
+检查包括源／副本哈希一致、USDZ 包校验和、USD 可打开及引用完整性；`OmniPBR.mdl`、`gltf/pbr.mdl` 等标准材质由已安装的 Isaac Sim 提供，不重复复制。未启动 Kit 的 USD 检查器会报告这些运行时模块无法直接解析，脚本核实本机确有对应模块后单独记录。源模型的质量、碰撞配置和功能标注按原样保留；通过文件检查不代表所有模型都能被当前夹爪抓取，新增对象尚未逐一接入任务或进行物理验收。原有积木和篮子的准备产物仍位于 `.cache/assets/scenes/`。
+
+### RoboDojo 示例宫格
+
+在仓库根目录激活完整环境，按[环境说明](environment.md)配置 EULA、GPU 和 Vulkan 后执行：
+
+```bash
+python scripts/render_asset_gallery.py --collection robodojo
+```
+
+默认从已复制的模型中渲染 30 个代表条目，选择在 [`configs/assets/robodojo_preview.json`](../configs/assets/robodojo_preview.json) 中维护。输出位于 `.cache/previews/robodojo-sample/`：`food.jpg` 为食品与饮料，`everyday.jpg` 为玩具与日用品，`tools_containers.jpg` 为工具与容器。每格标注类别／型号和源尺寸；独立缩放取景，不是相同比例尺。单模型 PNG 在 `images/`，源路径、实测尺寸与失败信息在 `render-manifest.json`。可用 `--group food`、`--limit 3` 只检查少量条目，或用 `--output-dir` 保存另一份预览。渲染保留源材质、不推进物理时间，也不修改源资产。
+
+## Isaac Sim 官方物体缓存
+
+仅保留适合当前桌面抓放任务的 15 个源模型，清单在 [`assets/isaacsim.py`](../src/loom_env/assets/isaacsim.py) 单处维护，下载和宫格预览共用：
+
+- **12 个抓取物体**：糖盒、番茄汤罐、金枪鱼罐、布丁盒、果冻盒、午餐肉罐、泡沫砖、通心粉包装盒，以及蓝／绿／红／黄四个积木。
+- **2 个容器**：YCB 碗、小号 KLT 箱。
+- **1 个桌面**：Thorlabs 工作台。
+
+其余官方资产及旧宫格已从本地缓存删除，包括工具、装配零件、大纸箱、大周转箱、魔方、基础几何体、杯子、额外桌台与支架。原有 ManiSkill／RoboDojo 任务资产不受影响。保留模型有物理包装层时优先使用该入口；内部网格、材质及纹理作为依赖保留，不计为独立物体。这些源模型尚未注册到项目任务目录，接入时仍按本文质量门槛检查实际抓放效果。
+
+使用与本机 Isaac Sim 6.0.1 对应的 **6.0 资产根目录**，版本关系见 [NVIDIA 资产设置文档](https://docs.isaacsim.omniverse.nvidia.com/6.0.1/installation/install_faq.html)。在仓库根目录激活完整环境后运行：
+
+```bash
+conda activate loom-env
+python scripts/download_isaacsim_assets.py
+```
+
+默认下载到 `.cache/assets/isaacsim-6.0/`，可用 `--output-dir` 指定缓存、`--workers` 调整下载线程数（默认 8）。下载与依赖检查不启动仿真，不需要 GPU；需要访问 NVIDIA 公开 S3 服务。当前保留模型及依赖共约 307 MiB，建议准备至少 0.5 GB 空间。
+
+- `Isaac/Props/`：保留的源 USD、网格、材质和纹理。
+- `download-manifest.json`：源版本地址、入口清单、ETag、大小、更新时间及逐文件 SHA-256。
+- `dependency-report.json`：USD 引用、USDZ 包内成员及 MDL 纹理路径的检查结果。
+
+首次运行只获取选定入口，再递归补齐引用。后续运行复用清单并校验文件；重跑会跳过校验通过的文件，未完成的单个文件重新下载。官方版本目录可能更新，复现同一快照需保留并复用下载清单。源文件内容不做修改，Isaac Sim 自带的 `OmniPBR` 由运行环境提供。
+
+退出码 0 表示下载及上述依赖检查通过；1 表示下载失败；2 表示有缺失依赖，查看报告中的 `unresolved`。修改保留清单时应同步更新缓存清单并按依赖闭包清理，不能按文件名删除仍被其他模型引用的纹理。当前保留集合的依赖检查无缺失。
+
+### 渲染物体宫格图
+
+在仓库根目录激活完整 `loom-env` 环境，完成下载，并按[环境文档](environment.md)配置 EULA 和本机 GPU/Vulkan 后运行：
+
+```bash
+python scripts/render_asset_gallery.py
+```
+
+输出到 `.cache/previews/isaacsim-assets/`：`objects.jpg`、`containers.jpg`、`workspaces.jpg` 为分类宫格；`images/` 保存每件物体的 640×480 原图；`render-manifest.json` 记录源 USD、原始单位／坐标轴、尺寸和失败原因。`--group objects` 可只渲染抓取物体，`--limit 3` 可先检查少量模型，`--output-dir` 可指定输出目录。重跑会替换同名预览图。
+
+预览使用 Isaac Sim RTX 和源材质，各格独立居中、缩放取景，**不是相同比例尺**；标注尺寸按源单位与默认姿态下的几何包围盒换算为厘米。物理时间不推进，源文件不修改。图像只用于观察外观，不能替代碰撞、质量和抓放验收。渲染失败会显示失败格并以非零状态退出；排查时查看清单、终端与 Kit 日志。环境文档中已列出的上游启动警告仍可能出现。
+
 ## 后续候选
 
 共享目录中还确认了 ManiSkill 厨房台面 GLB、RoboDojo 房间／玩具车／碗，以及 LIBERO 扫描物体与功能区域配置。这些候选尚未完成当前环境的物理验收，因此未注册。RoboTwin 和 RoboCasa 的主要对象包在本地尚未下载。先通过现有少量资产检验接口，再按任务需要逐个加入。
