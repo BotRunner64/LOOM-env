@@ -1,4 +1,6 @@
-# Limits describe the pinned simulation asset; task reachability still needs validation.
+# UR5 position ranges: official EN 09/2016 specifications (all six joints ±360°).
+# https://www.universal-robots.com/media/50588/ur5_en.pdf
+# Asset preparation reads these ranges when normalizing the RoboTwin URDF.
 id: dual_ur5_wsg_tabletop
 control_type: joint_position
 control_dt: 0.05
@@ -10,12 +12,12 @@ arms:
     joint_names: &id001 [shoulder_pan_joint, shoulder_lift_joint, elbow_joint, wrist_1_joint,
       wrist_2_joint, wrist_3_joint]
     joint_limits: &id002
-    - [-3.142, 3.142]
-    - [-3.142, 0.0]
-    - [-3.142, 3.142]
-    - [-1.75, 1.75]
-    - [-3.141592653589793, 3.141592653589793]
-    - [-3.141592653589793, 3.141592653589793]
+    - [-6.283185307179586, 6.283185307179586]
+    - [-6.283185307179586, 6.283185307179586]
+    - [-6.283185307179586, 6.283185307179586]
+    - [-6.283185307179586, 6.283185307179586]
+    - [-6.283185307179586, 6.283185307179586]
+    - [-6.283185307179586, 6.283185307179586]
     initial_positions: &id003 [0, -1.5, 1.5, -1.5, -1.57, 0]
     base_pose: [0, 0.45, 0.75, 0, 0, 0, 1]
     tcp_frame: wrist_3_link
@@ -44,7 +46,7 @@ cameras:
     height: 480
     period_steps: 1
     parent_frame: world
-    pose: [2.0, 0.0, 1.9, 0.3681179873103491, 0.3681179873103491, 0.6037293660396003, 0.6037293660396003]
+    pose: [-0.25, 0.0, 1.55, -0.25929940790384143, 0.25929940790384143, 0.6578478677176944, -0.6578478677176944]
   # Asset camera frame: +X forward, +Y left, +Z up; pose converts OpenGL axes.
   - name: left_wrist
     width: 640

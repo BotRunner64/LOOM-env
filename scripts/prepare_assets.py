@@ -28,6 +28,8 @@ from loom_env.embodiments.assets import (
     validate_visuals,
 )
 
+from loom_env.specs.config import load_deployment
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -96,6 +98,25 @@ def normalize_urdf(root, name):
                 joint.remove(extra)
             changes.append(
                 f"Remove duplicate limit from {joint.get('name')}; retain first complete limit"
+            )
+    if name == "ur5_wsg":
+        # The pinned RoboTwin model restricts UR5's range beyond the official
+        # specification. Use the deployment as the single reviewed range source.
+        deployment = load_deployment(ROOT / "configs/deployments/dual_ur5_wsg.yaml")
+        arm = deployment.arms["right"]
+        if deployment.arms["left"].joint_limits != arm.joint_limits:
+            raise ValueError("Both UR5 arms must share the prepared asset's limits")
+        for joint_name, (lower, upper) in zip(arm.joint_names, arm.joint_limits):
+            limit = robot.find(f"joint[@name='{joint_name}']/limit")
+            if limit is None:
+                raise ValueError(f"Missing UR5 joint limit: {joint_name}")
+            before = (limit.get("lower"), limit.get("upper"))
+            limit.set("lower", str(lower))
+            limit.set("upper", str(upper))
+            changes.append(
+                f"Restore official UR5 position range for {joint_name}: "
+                f"{before} -> ({lower}, {upper}) rad; "
+                "source: https://www.universal-robots.com/media/50588/ur5_en.pdf"
             )
     if name == "xarm6_robotiq":
         # Replace SAPIEN's external four-bar point constraints with equivalent

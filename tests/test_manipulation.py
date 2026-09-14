@@ -53,6 +53,15 @@ def test_grasp_goal_places_contact_center_on_object(collection, name, base_yaw):
         # A top grasp must preserve Piper's normal finger order, not roll it over.
         base_y = Rotation.from_quat(arm.base_pose[3:]).apply([0, 1, 0])
         assert np.dot(opening_axis, base_y) > 0
+    if name == "ur5_wsg":
+        # UR's initial local +X points along -base-Y; reversing it flips the wrist.
+        base_rotation = Rotation.from_quat(arm.base_pose[3:])
+        np.testing.assert_allclose(
+            opening_axis, base_rotation.apply([0, -1, 0]), atol=1e-12
+        )
+        np.testing.assert_allclose(
+            Rotation.from_quat(goal[3:]).apply([0, 1, 0]), [0, 0, -1], atol=1e-12
+        )
 
 
 def test_grasp_evidence_uses_signed_joint_mapping(collection):

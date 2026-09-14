@@ -59,7 +59,8 @@ PROFILES = {
         "wrist_3_link",
         ("gripper_left", "gripper_right"),
         (0.0, 0.222, 0.0),
-        (-0.5, -0.5, 0.5, 0.5),
+        # Local +Y points down; local +X keeps the initial -base-Y finger order.
+        (-0.5, 0.5, -0.5, 0.5),
         ("base_link",),
     ),
     "i2rt:yam-v1": ParallelJaw(

@@ -91,7 +91,7 @@ python scripts/check_kinematics.py \
 源文件保持不变，必要处理写入每个模型的 `asset.json`：
 
 - 当前 URDF 导入器会丢失 GLB 外观。准备入口用固定版本 Trimesh 将 GLB 转成带材质的 OBJ，保留子网格及节点变换；转换后及仿真启动时都检查每个刚体是否具有可见网格，避免只有碰撞几何却看不到本体。
-- UR5 源文件的夹爪关节含重复 `<limit>`；保留第一份完整定义，避免不同解析器得到不同结果。左右指使用 `[-0.5, +0.5]` 的宽度映射。
+- UR5 源文件的夹爪关节含重复 `<limit>`；保留第一份完整定义，避免不同解析器得到不同结果。左右指使用 `[-0.5, +0.5]` 的宽度映射。六个机械臂关节的位置范围恢复为[官方 UR5 EN 09/2016 规格](https://www.universal-robots.com/media/50588/ur5_en.pdf)的 ±360°。范围统一维护在 `configs/deployments/dual_ur5_wsg.yaml`，准备流程读取并写入派生 URDF，再生成 USD；cuRobo 读取同一 URDF。源资产保持不变，`asset.json` 逐关节记录前后范围和依据，UR 准备版本为 4。速度、力矩和夹爪范围继续沿用各自现有配置。本次恢复的是关节位置范围，不表示已核对全部实机参数。
 - Robotiq 源 URDF 是开链模型，ManiSkill 另在 SAPIEN 中添加四杆闭环约束。本实现用五条理想平行连杆 mimic 关系表达对应角度约束，仅驱动主关节；从动关节的 PD 为零。其轻型连杆在源 URDF 的 1000 N·m 上限下会发生数值失稳，诊断采用 1 N·m 夹爪力矩上限和 0.001 kg·m² 关节转动惯量，参数属于仿真控制配置。沿用 ManiSkill 对夹爪内部及相邻腕部的碰撞排除，保留与外部物体及其他机械臂的碰撞。抓持验收以完整回合的双指接触、抬升和释放结果为准，见下文“抓放录制”。
 - YAM 保留官方 URDF 的关节轴、惯性、位置限位和随附夹爪。源文件只有外观网格，准备入口使用相同网格及局部变换补充碰撞几何：连杆和夹爪壳体使用凸包，两指使用 PhysX 原生凸分解，保留外部接触面的凹陷。为避免指间内部接触与抖动，沿用官方平行夹爪 MJCF 的指间排除规则，仅过滤 `tip_left`／`tip_right`，保留它们与物体、其他连杆和另一臂的碰撞。两个关节范围均为约 `[-0.04695, 0]` m。指尖几何检查表明 `q=0` 时两指尖接近闭合，`q=-0.04695` 时张开，因此命令映射为 `q7 = q8 = -width / 2`。`width` 表示模型开合坐标，尚未标定为实机指尖距离。末端测量使用 `gripper` 刚体坐标系。诊断沿用该 URDF 的 1 N·m 机械臂力矩、1 N 夹爪力和 1 rad/s／m/s 速度上限；这些导出模型中的数值不代表已校验的实机驱动参数。
 
@@ -99,11 +99,33 @@ python scripts/check_kinematics.py \
 
 机械臂及夹爪的力／力矩上限默认取自 URDF，Robotiq 采用上文说明的保守夹爪上限。诊断把机械臂速度上限限制为源限值与 3 rad/s 的较小值，夹爪限制为源限值与 1 m/s 或 rad/s 的较小值。PD 增益按模型配置；机器人全部连杆禁用重力，自碰撞启用。导入器可能嵌套刚体，因此共用适配器明确将刚体配置应用到每根连杆。
 
+## 抓取姿态方向
+
+抓取姿态由 `src/loom_env/embodiments/manipulation.py` 的 `PROFILES` 定义，四元数采用 xyzw、相对安装基座。标定同时约束夹指朝向和左右指顺序；仅检查开合轴水平、接触中心正确或任务成功，会漏掉绕抓取轴的 180° 翻转。
+
+UR5＋WSG 的 `wrist_3_link` 局部 +Y 指向夹指末端，顶部抓取时应朝下；局部 +X 为开合轴，应保持初始姿态的 -基座 Y 方向。此前标定把开合轴指向 +基座 Y，导致靠近物体时翻转。修正仅涉及抓取姿态，无需重新准备资产。`tests/test_manipulation.py` 覆盖基座转动后的抓取中心、朝下方向和有符号开合轴。
+
+验证时从仓库根目录激活完整 `loom-env` 环境，按[环境说明](environment.md)配置 Vulkan，并准备 UR 规划／仿真资产和桌面场景后运行：
+
+```bash
+python scripts/collect.py --deployment configs/deployments/dual_ur5_wsg.yaml \
+  --scene configs/scenes/tabletop_compact.yaml --arm right --seed 0 \
+  --episode-id ur-pp-official-seed0 --output-dir .cache/checks/ur-flip/official
+python scripts/inspect_data.py episode \
+  .cache/checks/ur-flip/official/episodes/ur-pp-official-seed0
+```
+
+查看 `.cache/checks/ur-flip/official/videos/ur-pp-official-seed0.mp4`，要求靠近和搬运阶段均无夹爪翻转、物体实际抓起并释放入篮；同时检查 `RESULT` 的任务结果与视频错误。全程实测 `observations/robot/right/tcp_pose_world` 用于量化姿态变化，不能只比较阶段端点。重复运行须更换输出目录或 episode ID。
+
+修正终点朝向后曾仍出现约 90° 中途侧翻：同腕部构型的接近点需要 `wrist_1=-1.95136 rad`，超出源资产下限 `-1.75 rad`。仅在临时模型中恢复该关节范围，原规划器即生成保持原腕部构型的路径，无需增加姿态约束。正式资产现按上述官方范围修正全部六关节。已有 UR 缓存必须依次运行 `python scripts/prepare_assets.py ur5_wsg` 和 `python scripts/prepare_planning.py ur5_wsg`；前者需 EULA 和完整仿真环境，后者需 CUDA。旧回合仍可离线查看，但其重放需要原资产版本，不能与新资产混用。
+
+2026-09-14 的 UR 右臂、紧凑场景、seed 0 复验在 208 步完成抓放，三路视频完整性检查通过。实测全程相对抓取目标的最大姿态误差为 4.06°（初始倾角），接近完成后最大为 0.18°，相邻控制帧最大转角为 0.20°以内；`wrist_2` 保持在 -90° 附近，没有换腕。测量位于 `.cache/checks/ur-flip/official-analysis.json`，实际 USD 限位检查为 `official-asset-check.json`，关键帧为 `official-keyframes.jpg`，视频使用上面的复现路径。该结果只覆盖这一次完整物理回合，不代表跨种子验收。
+
 ## 三路相机
 
 六类部署统一配置 `front`、`left_wrist`、`right_wrist`，均为 640×480 RGB、每个控制步采样一次（默认 20 Hz）。抓取采集与运动预览读取同一部署配置，不再由预览脚本单独覆盖相机。
 
-- Panda 的 `front` 固定在机器人侧 `(-0.25, 0.0, 1.55)` m，朝向共同操作区 `(0.45, 0.0, 0.80)` m；其余五类运动诊断仍使用外部观察位置 `(2.0, 0.0, 1.9)` m。
+- 六类本体的 `front` 均固定在世界坐标 `(-0.25, 0.0, 1.55)` m，从机器人侧上方朝向共同操作区 `(0.45, 0.0, 0.80)` m。统一观察方向，便于比较各本体的操作画面；采集与运动诊断使用同一位姿。
 - 腕相机通过固定安装变换跟随机械臂，不跟随活动夹指开合。资产已有相机安装系时直接引用；没有安装系时，由 deployment 显式定义仿真安装位姿。
 
 | 本体 | deployment 引用的父坐标系（每侧） | 安装来源 |
@@ -126,6 +148,20 @@ xArm 的 `camera_link` 本身并非光学中心。[ManiSkill 固定版本配置]
 `focal_length` 与 `horizontal_aperture` 使用 mm，`clipping_range` 使用 m。全局相机焦距 22 mm、水平孔径 24 mm（水平视场约 57°），腕相机焦距 16 mm（约 74°），近裁剪距离 1 cm。实际内参写入 Episode 元数据；采样时相机世界位姿保存在真值 `cameras/<name>/pose_world`，与该相机 RGB 时间戳对应，不作为模型观测。
 
 目前模拟光学传感器；资产自带的相机／支架外观随资产保留，不额外增加外壳、支架质量或碰撞体。Panda、YAM 的显式安装是仿真方案；引用上游安装系也不表示已经完成实机安装标定。采集和运动预览均自动生成包含全部已配置相机的视频。
+
+### 统一主视角验证（2026-09-14）
+
+六类本体的主相机配置完全一致，光轴指向上述共同操作区。使用 `check_scene_assets.py` 在 `tabletop.yaml`、种子 0 下逐类渲染，六份场景检查与容器释放检查均通过；初始画面中目标物和容器可见，机械臂主要位于画面边缘。这次检查不覆盖完整抓放轨迹中的遮挡。
+
+[六类主视角对照图](../outputs/front-camera-unified/front-comparison.jpg)保留各路完整画面；原图及报告位于 `outputs/front-camera-unified/<本体>/`，配置检查为 `configuration-check.json`，汇总为 `summary.json`。本次运行的 collection 快照保存在同目录 `dual_<本体>.yaml`，引用仓库当前部署。资产和环境准备完成后，在仓库根目录可复验，例如：
+
+```bash
+python scripts/check_scene_assets.py \
+  --collection outputs/front-camera-unified/dual_piper.yaml \
+  --output-dir outputs/front-camera-unified-repeat/piper
+```
+
+预期生成 `front.png`、`front-container.png` 和 `validation.json`（`passed: true`）。上述快照与图像属于本地验证产物，不进入 Git；没有这些快照时，使用下一节的六类运动预览命令检查当前部署视角。
 
 ### 检查相机挂载
 

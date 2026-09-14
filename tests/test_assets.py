@@ -72,3 +72,51 @@ def test_verified_hash_does_not_allow_mirrored_collision(tmp_path):
     (root / name / "asset.json").write_text(json.dumps(manifest))
     with pytest.raises(ValueError, match="mirrored collision"):
         verify_asset(root, name)
+
+
+def test_ur5_preparation_restores_official_ranges_and_preserves_source(tmp_path):
+    import math
+    from pathlib import Path
+    import runpy
+    import xml.etree.ElementTree as ET
+
+    from loom_env.specs.config import load_deployment
+
+    repo = Path(__file__).parents[1]
+    deployment = load_deployment(repo / "configs/deployments/dual_ur5_wsg.yaml")
+    arm = deployment.arms["right"]
+    root = ET.Element("robot", name="source")
+    for name in arm.joint_names:
+        joint = ET.SubElement(root, "joint", name=name, type="revolute")
+        ET.SubElement(
+            joint, "limit", lower="-1.75", upper="1.75", effort="100", velocity="3.2"
+        )
+    finger = ET.SubElement(
+        root, "joint", name="base_joint_gripper_left", type="prismatic"
+    )
+    ET.SubElement(
+        finger, "limit", lower="-0.055", upper="-0.0027", effort="1", velocity="1"
+    )
+    original = source_urdf(tmp_path, "ur5_wsg")
+    original.parent.mkdir(parents=True)
+    ET.ElementTree(root).write(original)
+    before = original.read_bytes()
+    normalize = runpy.run_path(str(repo / "scripts/prepare_assets.py"))[
+        "normalize_urdf"
+    ]
+    changes = normalize(tmp_path, "ur5_wsg")
+    prepared = ET.parse(prepared_urdf(tmp_path, "ur5_wsg"))
+    assert original.read_bytes() == before
+    for name, bounds in zip(arm.joint_names, arm.joint_limits):
+        limit = prepared.find(f"joint[@name='{name}']/limit")
+        assert tuple(float(limit.get(key)) for key in ("lower", "upper")) == bounds
+        assert bounds == (-math.tau, math.tau)
+        assert (limit.get("effort"), limit.get("velocity")) == ("100", "3.2")
+    assert (
+        prepared.find("joint[@name='base_joint_gripper_left']/limit").get("lower")
+        == "-0.055"
+    )
+    assert (
+        sum("Restore official UR5 position range" in change for change in changes) == 6
+    )
+    assert preparation_version("ur5_wsg") == 4

@@ -66,6 +66,7 @@ MODELS = {
         asset="robotwin:ur5-wsg",
         source="robotwin",
         urdf="embodiments/ur5-wsg/ur5_wsg_gripper.urdf",
+        preparation_version=4,
         base="base_link",
         arm_gains=(1000.0, 80.0),
         gripper_gains=(1000.0, 50.0),
