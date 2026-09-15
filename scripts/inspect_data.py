@@ -54,24 +54,39 @@ def main():
                     "camera_videos",
                 )
             }
-            if manifest["spec"]["collection"]["task"]["id"] == "push_object":
-                import math
+            if manifest["spec"]["collection"]["task"]["id"] in {
+                "push_object",
+                "push_into_region",
+            }:
+                import numpy as np
 
                 from loom_env.data.episodes import EpisodeReader
-                from loom_env.tasks.push import PushTask
+                from loom_env.tasks import create_task
 
                 with EpisodeReader(args.path) as reader:
-                    task = PushTask(reader.spec.collection)
+                    task = create_task(reader.spec.collection)
                     samples = [
                         task.metrics(reader.world_state(k))
                         for k in range(len(reader) + 1)
                     ]
+                    other_displacement = {}
+                    for name, obj in reader.spec.collection.scene.objects.items():
+                        if obj["static"] or name == task.object_name:
+                            continue
+                        positions = np.asarray(
+                            [
+                                reader.world_state(k)[f"{name}/pose_world"][:2]
+                                for k in range(len(reader) + 1)
+                            ]
+                        )
+                        other_displacement[name] = float(
+                            np.linalg.norm(positions - positions[0], axis=1).max()
+                        )
                     result["push_metrics"] = {
-                        "target_pose_world": task.target_pose.tolist(),
+                        "target_position_world": task.target_position_world.tolist(),
+                        "non_target_max_xy_displacement_m": other_displacement,
+                        "goal_radius_m": task.parameters["position_tolerance"],
                         "final_position_error_m": samples[-1]["position_error"],
-                        "final_angle_error_deg": math.degrees(
-                            samples[-1]["angle_error"]
-                        ),
                         "max_clearance_m": max(m["clearance"] for m in samples),
                         "min_clearance_m": min(m["clearance"] for m in samples),
                         "grasped_samples": sum(m["grasped"] for m in samples),
@@ -81,6 +96,16 @@ def main():
                         ),
                         "sample_period_s": reader.spec.collection.deployment.control_dt,
                     }
+                    if reader.spec.collection.task.id == "push_into_region":
+                        result["push_metrics"].pop("goal_radius_m")
+                        result["push_metrics"].update(
+                            region_pose_world=task.region_pose.tolist(),
+                            region_bounds_xy_m=task.region_bounds.tolist(),
+                            final_region_margin_m=samples[-1]["region_margin"],
+                            max_tilt_deg=float(
+                                np.degrees(max(m["tilt"] for m in samples))
+                            ),
+                        )
         else:
             result = {
                 "episodes": build_index(args.root, args.output),

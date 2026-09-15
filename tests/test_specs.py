@@ -175,3 +175,28 @@ def test_instruction_follows_role_bindings_without_changing_scene(collection):
     ):
         with pytest.raises(ValueError, match="placeholder"):
             replace(original, task=replace(original.task, instruction=instruction))
+
+
+def test_collection_task_parameter_overrides(tmp_path, collection):
+    value = plain(collection)
+    original = dict(value["task"]["parameters"])
+    task_path = tmp_path / "task.json"
+    task_path.write_text(json.dumps(value["task"]))
+    value["task"] = task_path.name
+    value["task_parameters"] = {"hold_time": 0.75}
+    path = tmp_path / "collection.json"
+    path.write_text(json.dumps(value))
+    loaded = load_collection(path)
+    assert dict(loaded.task.parameters) == {**original, "hold_time": 0.75}
+    assert json.loads(task_path.read_text())["parameters"] == original
+    assert collection_from_dict(plain(loaded)) == loaded
+
+
+@pytest.mark.parametrize("overrides", [{"typo": 1}, [1], None])
+def test_collection_rejects_bad_task_overrides(tmp_path, collection, overrides):
+    value = plain(collection)
+    value["task_parameters"] = overrides
+    path = tmp_path / "collection.json"
+    path.write_text(json.dumps(value))
+    with pytest.raises(ValueError, match="task_parameters"):
+        load_collection(path)

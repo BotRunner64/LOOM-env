@@ -531,13 +531,23 @@ def load_scene(path: str | Path) -> SceneSpec:
 
 
 def load_collection(path: str | Path) -> CollectionSpec:
-    """Resolve one level of task/deployment/scene references relative to this file."""
+    """Resolve references and override existing task parameters for one case."""
     path = Path(path)
     value = _read_mapping(path)
     for key in ("task", "deployment", "scene"):
         if isinstance(value.get(key), str):
             value[key] = _read_mapping(path.parent / value[key])
     try:
+        overrides = value.pop("task_parameters", {})
+        if not isinstance(overrides, dict):
+            raise ValueError("task_parameters must be a mapping")
+        parameters = value["task"]["parameters"]
+        if not isinstance(parameters, dict):
+            raise ValueError("Task parameters must be a mapping")
+        unknown = overrides.keys() - parameters.keys()
+        if unknown:
+            raise ValueError(f"Unknown task_parameters: {sorted(unknown)}")
+        value["task"]["parameters"] = {**parameters, **overrides}
         return collection_from_dict(value)
     except (KeyError, TypeError, ValueError) as error:
         raise ValueError(f"Invalid collection config {path}: {error}") from error

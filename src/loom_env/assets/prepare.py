@@ -1,4 +1,4 @@
-"""Copy USDZ assets unchanged; convert mesh-only workspaces with standard tools."""
+"""Reference pinned USD assets unchanged; convert mesh-only workspaces."""
 
 from dataclasses import asdict
 import importlib.metadata
@@ -42,15 +42,24 @@ def mesh_arrays(prims):
 
     vertices, triangles = [], []
     for prim in prims:
-        mesh = UsdGeom.Mesh(prim)
-        points = np.array(mesh.GetPointsAttr().Get(), dtype=float)
+        if prim.IsA(UsdGeom.Cube):
+            import trimesh
+
+            cube = trimesh.creation.box([UsdGeom.Cube(prim).GetSizeAttr().Get()] * 3)
+            points = np.asarray(cube.vertices)
+            indices = np.asarray(cube.faces).reshape(-1)
+            counts = [3] * len(cube.faces)
+        else:
+            mesh = UsdGeom.Mesh(prim)
+            points = np.array(mesh.GetPointsAttr().Get(), dtype=float)
+            indices = np.array(mesh.GetFaceVertexIndicesAttr().Get(), dtype=int)
+            counts = mesh.GetFaceVertexCountsAttr().Get()
         matrix = np.array(
             UsdGeom.Xformable(prim).ComputeLocalToWorldTransform(Usd.TimeCode.Default())
         )
         points = (np.c_[points, np.ones(len(points))] @ matrix)[:, :3]
-        indices = np.array(mesh.GetFaceVertexIndicesAttr().Get(), dtype=int)
         start, offset = 0, len(vertices)
-        for count in mesh.GetFaceVertexCountsAttr().Get():
+        for count in counts:
             face = indices[start : start + count]
             triangles.extend(
                 [offset + face[0], offset + face[i], offset + face[i + 1]]
@@ -90,7 +99,12 @@ def prepare_scene_assets(asset_root, source_root):
     from pxr import Gf, Usd, UsdGeom, UsdPhysics
 
     for asset_id, definition in ASSETS.items():
-        source = Path(source_root) / definition.path
+        origin = (
+            Path(__file__).resolve().parents[3]
+            if definition.source == "loom-env"
+            else Path(source_root)
+        )
+        source = origin / definition.path
         if not source.is_file() or sha256(source) != definition.sha256:
             raise ValueError(f"Source checksum mismatch or missing asset: {source}")
         directory = prepared_directory(asset_root, asset_id).resolve()
@@ -112,7 +126,7 @@ def prepare_scene_assets(asset_root, source_root):
                 check=True,
             )
         else:
-            local = directory / "source.usdz"
+            local = directory / ("source" + source.suffix)
             shutil.copyfile(source, local)
         source_stage = Usd.Stage.Open(str(local))
         if not mesh_only and (
@@ -139,19 +153,27 @@ def prepare_scene_assets(asset_root, source_root):
         collision_prims = [
             p for p in stage.Traverse() if p.HasAPI(UsdPhysics.CollisionAPI)
         ]
-        if not collision_prims or any(not p.IsA(UsdGeom.Mesh) for p in collision_prims):
-            raise ValueError(f"Expected authored mesh collision: {asset_id}")
+        visual_region = (
+            definition.category == "target_region" and not definition.dynamic
+        )
+        if (not collision_prims and not visual_region) or any(
+            not (p.IsA(UsdGeom.Mesh) or p.IsA(UsdGeom.Cube)) for p in collision_prims
+        ):
+            raise ValueError(f"Expected authored mesh or box collision: {asset_id}")
         actual_dynamic = (
             root.HasAPI(UsdPhysics.RigidBodyAPI)
             and UsdPhysics.RigidBodyAPI(root).GetRigidBodyEnabledAttr().Get()
         )
         if bool(actual_dynamic) != definition.dynamic:
             raise ValueError(f"Source rigid body differs from inventory: {asset_id}")
-        vertices, triangles = mesh_arrays(collision_prims)
+        geometry = collision_prims or [
+            p for p in stage.Traverse() if p.IsA(UsdGeom.Mesh)
+        ]
+        vertices, triangles = mesh_arrays(geometry)
         actual = np.array([vertices.min(axis=0), vertices.max(axis=0)])
         if not np.allclose(actual, definition.bounds, atol=0.001, rtol=0):
             raise ValueError(f"Source dimensions differ: {asset_id}: {actual}")
-        source_triangle_count = len(triangles)
+        source_triangle_count = len(triangles) if collision_prims else 0
         if mesh_only:
             # GLB has no source physics. Use a flat primitive for the tabletop
             # and retain the source lower geometry after coordinate conversion.
@@ -198,6 +220,9 @@ def prepare_scene_assets(asset_root, source_root):
         reference_prim.GetReferences().ClearReferences()
         reference_prim.GetReferences().AddReference(local.name)
         stage.GetRootLayer().Export(str(destination))
+        if not collision_prims:
+            vertices = np.empty((0, 3))
+            triangles = np.empty((0, 3), dtype=np.int32)
         np.savez_compressed(
             directory / "collision.npz", vertices=vertices, faces=triangles
         )

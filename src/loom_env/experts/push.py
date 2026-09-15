@@ -9,7 +9,7 @@ from loom_env.embodiments.commands import initial_command
 from loom_env.runtime.runner import SourceFailure
 from loom_env.scenes.workspace import corners
 from loom_env.specs.episode import Action, Event
-from loom_env.tasks.push import PushTask
+from loom_env.tasks import create_task
 
 
 class PushExpert:
@@ -25,14 +25,14 @@ class PushExpert:
         self.other = "left" if self.side == "right" else "right"
         self.arm = collection.deployment.arms[self.side]
         if self.arm.asset != PANDA_ASSET:
-            raise ValueError(
-                "Straight pushing currently requires the reviewed Panda fingers"
-            )
+            raise ValueError("Pushing currently requires the reviewed Panda fingers")
         self.arm_slice = collection.deployment.action_slices[f"{self.side}/arm"]
         self.grip_slice = collection.deployment.action_slices[f"{self.side}/gripper"]
         self.obj = collection.role_bindings["target_object"]
         self.asset = asset_definition(collection.scene.objects[self.obj]["asset"])
-        self.task = PushTask(collection)
+        if self.asset.push_height is None:
+            raise ValueError("Push object needs a reviewed Panda contact height")
+        self.task = create_task(collection)
         self.dt = collection.deployment.control_dt
 
     def reset(self, episode_input):
@@ -44,18 +44,20 @@ class PushExpert:
         self.planner.detach()
         world = self.world_state()
         obj = np.asarray(world[f"{self.obj}/pose_world"])
-        self.direction = self.task.target_pose[:2] - obj[:2]
+        self.direction = self.task.target_position_world[:2] - obj[:2]
         self.distance = np.linalg.norm(self.direction)
         self.direction /= self.distance
+        # A single straight push: face the direction of travel, irrespective of
+        # the object's initial or final yaw.
         yaw = np.arctan2(self.direction[1], self.direction[0])
         self.rotation = Rotation.from_euler("z", yaw) * Rotation.from_quat([1, 0, 0, 0])
         points = Rotation.from_quat(obj[3:]).apply(corners(self.asset))
         extent = -(points[:, :2] @ self.direction).min()
         # Closed Panda finger leading surface is roughly 1 cm ahead of the
-        # fingertip centre. Start a further 2 cm clear of the block.
+        # fingertip centre. Start a further 2 cm clear of the object.
         self.push_point = obj[:3].copy()
         self.push_point[:2] -= self.direction * (extent + 0.01 + 0.02)
-        self.push_point[2] = self.task.support[2] + 0.016
+        self.push_point[2] = self.task.support[2] + self.asset.push_height
         self.tcp_goal = self._tcp(self.push_point)
         self.travel = 0.0
         self.began = False
@@ -126,12 +128,15 @@ class PushExpert:
                         ].copy()
                     self._change(next_stage, events)
         elif self.stage == "push":
-            error = self.task.target_pose[:2] - truth[f"{self.obj}/pose_world"][:2]
+            error = (
+                self.task.target_position_world[:2]
+                - truth[f"{self.obj}/pose_world"][:2]
+            )
             remaining = float(error @ self.direction)
             if remaining < 0.003:
                 if np.linalg.norm(error) > self.task.parameters["position_tolerance"]:
                     raise SourceFailure(
-                        "Straight push missed the target laterally", kind="skill"
+                        "Push missed the target laterally", kind="skill"
                     )
                 self.retreat_start = self.tcp_goal.copy()
                 self._change("retreat", events)

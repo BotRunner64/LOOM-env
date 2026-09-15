@@ -1,0 +1,23 @@
+id: tabletop_push_choice
+objects:
+  table:
+    asset: maniskill:table
+    category: workspace
+    description: 木质餐桌
+    static: true
+    pose: [0, 0, 0, 0, 0, 0, 1]
+  near_block:
+    asset: robodojo:brick
+    category: graspable_object
+    description: 靠近右臂的积木
+    static: false
+    pose: [-0.05, -0.14, 0.0172, 0, 0, 0, 1]
+  far_block:
+    asset: robodojo:brick
+    category: graspable_object
+    description: 远离右臂的积木
+    static: false
+    pose: [-0.05, -0.04, 0.0172, 0, 0, 0, 1]
+parameters:
+  workspace_pose: [0.45, 0, 0.75, 0, 0, 0, 1]
+  workspace_size: [0.96, 1.9]

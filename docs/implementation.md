@@ -90,9 +90,58 @@ python scripts/check_pick_place.py outputs/manipulation/episodes/place-demo \
 
 专家和 Policy 都实现 `ActionSource.reset/act`，接入同一个 Runner。专家显式获得仿真真值；Policy 观测只有机器人状态和相机图像。真实接触力按左右臂分别保存，碰撞附着只影响规划器，物体始终由 PhysX 计算运动。
 
+## 日常物体推动：盘子与纸盒
+
+这组任务使用真实的 RoboDojo 浅盘和打开的纸盒，目标由场景中可见的餐垫／标线决定。两者共用 `push_into_region` 判据和直线推动专家，通过物体的接触高度标注适配外形。
+
+| 入口 | 场景与对象 | 可见目标 | 接触适配 |
+| --- | --- | --- | --- |
+| `configs/collection/push_plate.yaml` | 直径约 13 cm 的黑白花纹浅盘 | 22 × 22 cm、厚 1 mm 的固定绿色餐垫，有碰撞 | 闭合 Panda 手指中心距桌面 16 mm |
+| `configs/collection/push_box.yaml` | 约 17 × 29 × 18 cm 的打开纸盒 | 28 × 38 cm 蓝色桌面收纳标线，无碰撞 | 接触高度 80 mm，避开手掌先撞盒壁 |
+
+### 准备与运行
+
+从仓库根目录运行，先激活完整 `loom-env` 环境，按本文“运行前”设置 GPU／Vulkan／EULA，并准备 Panda。模型来自本地共享 `sim_projects`，版本与哈希在资产目录固定；不需要另行下载。薄垫和标线的几何是仓库内小型 USDA，正式缓存仍统一写入 `.cache/assets/scenes/`。
+
+```bash
+python scripts/prepare_assets.py scene \
+  --source-root /inspire/hdd/global_user/czxs253130598/projects/sim_projects
+python scripts/inspect_data.py config configs/collection/push_plate.yaml
+python scripts/check_scene_assets.py --collection configs/collection/push_plate.yaml \
+  --output-dir outputs/plate-health
+python scripts/collect.py --collection configs/collection/push_plate.yaml \
+  --output-dir outputs/household --episode-id plate-demo
+python scripts/inspect_data.py episode outputs/household/episodes/plate-demo
+python scripts/replay_episode.py outputs/household/episodes/plate-demo \
+  --output-dir outputs/plate-replay
+```
+
+纸盒将 collection 换为 `configs/collection/push_box.yaml`，同时换回合 ID 和输出目录即可。轨迹采集在沙箱外执行。期望健康检查 `passed=true`，采集 `outcome.code=success`、`video_error=null`，重放 `passed=true`。完整三视角视频在 `outputs/household/videos/plate-demo.mp4`；健康检查保存初态相机图像和运行时质量。重复运行需换回合 ID／输出目录。资产准备会更新缓存，不要与使用这些缓存的仿真并行执行。
+
+### 如何判断完成
+
+- 物体的**完整包围盒投影**必须落入目标矩形；这是对实际轮廓的保守检查。允许任意平面朝向，没有“中心到某坐标小于 1 cm”的任务成功条件。
+- 需要实测手指推动接触，之后退离且完整进入区域持续 0.25 s；不得夹持。倾斜超过 15°、最低点离桌超过 5 mm 或穿入桌面超过 5 mm，均记录为不可消除的失败。薄垫最高 1 mm，处于允许支撑高度范围内。
+- 专家向区域中心推进，`position_tolerance` 仅用于专家停止时的侧向偏差保护；任务验收使用 `region_margin`。改变场景目标区域的位置会改变专家目标和成功判据，不需要再手填一个隐藏的目标坐标。
+- `inspect_data.py episode` 输出 `final_region_margin_m`（非负表示全包含）、`max_tilt_deg`、接触／夹持样本和支撑高度。检查视频时应确认区域真实可见、物体确实滑动、手指已退离。20 Hz 记录的指标不能排除采样之间更短暂的事件。
+
+### 资产与当前边界
+
+浅盘和纸盒保持源碰撞和尺寸，纸盒开口与翻盖是单个刚体的一部分，不能开合。源 USD 未显式设置质量；纸盒元数据写 0.2 kg，而当前 PhysX 计算约 0.567 kg。本轮保留源设置，并在健康检查中报告实际质量，不把元数据值当成已生效的物理参数。餐垫是固定刚性薄垫，没有织物变形或垫子滑移；收纳标线只提供视觉与任务区域，不参与规划／物理碰撞。
+
+当前只覆盖 Panda 右臂、单段无遮挡推动；对象变大后接触高度必须检查，不能把对积木有效的高度直接推广。纸盒首轮确实被推动，但手指接触读数全为零，判据拒绝了该回合；相机显示盒壁贴近手掌／指根，随后将纸盒接触高度提高到 80 mm。失败记录保留在 `outputs/household-push/`，不能删掉接触要求或放宽判据来替代适配。
+
+首轮固定布局验收：盘子与纸盒均成功，实际位移约 22.9 cm，完整包围盒距目标区域最近边界分别约 35.0 mm、39.2 mm。盘子推上餐垫后原点升高约 0.998 mm，最大倾角约 1.22°；纸盒最大倾角小于 0.001°。20 Hz 记录中均有手指接触、无夹持，视频完整性及离线判据复核通过。两例物理重放均通过，物体最大位置差分别约 1.764 mm（盘子）、0.078 mm（纸盒）；重放保持原成功判据。完整测试 195 项通过。支撑检查使用包围盒最低点作为保守近似，不是实际网格穿透深度。
+
+本机验收证据、视频和失败索引集中在 `outputs/household-push/README.md`；该目录被 Git 忽略，其他机器按上述命令生成。实现入口为 [`push_region.py`](../src/loom_env/tasks/push_region.py)、[`push.py`](../src/loom_env/experts/push.py) 和 [`资产目录`](../src/loom_env/assets/catalog.py)。
+
 ## 直推积木
 
-首个非抓持操作案例使用 Panda 闭合夹爪从侧面推动原 RoboDojo 积木到目标位置，目标朝向为 0°；已验证固定初态及初始偏转纠正。仅需默认木桌与积木资产；准备方式沿用本文“运行前”和“资产准备”，无需下载新模型。以下命令从仓库根目录、激活完整 `loom-env` 环境并完成 GPU／EULA 配置后执行，轨迹采集在沙箱外运行：
+当前范围是简单 push：Panda 闭合夹爪沿桌面将积木推入目标圆区，随后退开。只检查目标位置，不要求目标朝向。先复用已有木桌与 RoboDojo 积木，围绕距离、方向和目标选择拓展；新形状以后单独验证。
+
+### 运行与检查
+
+以下命令从仓库根目录执行，先激活完整 `loom-env` 环境，完成本文“运行前”的 GPU／EULA 设置及默认 Panda、木桌、积木资产准备。轨迹采集在沙箱外运行，无需新增资产。
 
 ```bash
 python scripts/inspect_data.py config configs/collection/push.yaml
@@ -103,55 +152,50 @@ python scripts/replay_episode.py outputs/push/episodes/push-demo \
   --output-dir outputs/push-replay
 ```
 
-重复运行需更换回合 ID 和重放目录。期望采集输出 `outcome.code=success`、`video_error=null`，原因是 `object_pushed_to_pose_and_released`；重放输出 `passed=true`。轨迹在 `outputs/push/episodes/push-demo/`，三视角拼接视频在 `outputs/push/videos/push-demo.mp4`。离线检查命令同时输出 `push_metrics`，包含最终位置／朝向误差、最低点离桌范围、夹持与接触样本数。
+期望采集输出 `outcome.code=success`、原因 `object_pushed_to_region_and_released`、`video_error=null`；重放输出 `passed=true`。轨迹在 `outputs/push/episodes/push-demo/`，三视角拼接视频在 `outputs/push/videos/push-demo.mp4`。重复运行需更换回合 ID 或输出目录。离线检查的 `push_metrics` 输出目标圆区、最终位置误差、最低点离桌范围、接触／夹持样本数，以及每个非目标动态物体相对初始位置的最大 XY 位移。
 
-配置与行为：
+### 变体入口
 
-- 场景为 [`tabletop_push.yaml`](../configs/scenes/tabletop_push.yaml)，只含木桌和积木。积木初态位于工作区局部 `(-0.05, -0.10)` m；默认固定初态，不因更换 seed 自动改变布局。
-- 目标在 [`push_object.yaml`](../configs/tasks/push_object.yaml) 单处定义：`target_position` 是积木位姿原点的工作区局部 XY，`target_yaw` 是相对工作区的绕 Z 轴角度，单位 rad。默认目标为 `(0.05, -0.10)` m、0 rad，对应世界 XY `(0.50, -0.10)` m，要求约 10 cm 平移。
-- 专家先闭合夹爪，再用 cuRobo 接近和下降；接触段用实测关节与末端位姿反馈，以约 2 cm/s 沿初始目标方向推进；根据积木的实测侧向位置误差，以 0.5 s⁻¹ 比例、最高 5 mm/s 修正夹爪的侧向运动。夹爪朝向在该次推动中固定，积木转正依靠接触产生的力矩，尚无目标朝向反馈控制。小步关节变化上限为 0.4 rad/s，检查起点、中点和终点的规划碰撞约束。允许目标物接触，桌子、其他物体、另一臂及自碰撞检查继续保留；积木始终由 PhysX 计算运动。
-- 成功要求位置误差不超过 1 cm、完整姿态误差不超过 5°，曾出现实测接触，随后无夹持且无推动接触，连续满足 0.25 秒。实测滑动推力约 0.17 N，接触阈值使用 0.02 N；不得沿用抓持检测的 0.2 N 阈值来判断是否退离。
-- 记录期间任何采样帧出现夹持、积木最低包围点高于桌面 5 mm 或低于桌面 5 mm，立即失败；初始已在目标附近也不接受。检查频率为 20 Hz，不保证捕获两个控制帧之间的瞬时抬升。判据不使用速度门槛。
+默认初始 XY 为工作区局部 `(-0.05, -0.10)` m。所有案例共用 [`push_object.yaml`](../configs/tasks/push_object.yaml) 的专家和验收参数：
 
-当前只验收 Panda 右臂和这块积木的直推，不具备主动转向、绕障或通用不规则物体推移能力。目标数值随 Episode 配置保存，原始相机视频不额外绘制目标标记；验收对照图可以添加目标轮廓，但这不是训练相机图像。场景初态变化使用已有 `position_min`／`position_max` 或显式场景配置，不修改任务判据。
+| Collection 配置（`configs/collection/`） | 目标 XY（m） | 变化 |
+| --- | --- | --- |
+| `push.yaml` | (0.05, -0.10) | 基线，10 cm |
+| `push_short.yaml` | (0.01, -0.10) | 短推，6 cm |
+| `push_long.yaml` | (0.09, -0.10) | 长推，14 cm |
+| `push_diagonal_positive.yaml` | (0.05, -0.07) | 向 +Y 斜推，约 +16.7°、10.4 cm |
+| `push_diagonal_negative.yaml` | (0.05, -0.13) | 向 −Y 斜推，约 −16.7°、10.4 cm |
+| `push_near_block.yaml` | (0.05, -0.14) | 双积木场景，选靠近右臂的一块，10 cm |
+| `push_far_block.yaml` | (0.05, -0.04) | 同一双积木场景，选远离右臂的一块，10 cm |
 
-固定初态验收：212 个控制步，实际平移约 98.96 mm，最终位置误差 1.09 mm、姿态误差 0.49°；20 Hz 记录中无夹持，最低包围点相对桌面为 -0.16 至 -0.14 mm。接触持续到第 207 帧，第 208–212 帧无推动接触后成功。视频位于 `outputs/push-development/run3/videos/push-seed0.mp4`，测量与目标轮廓对照位于 `outputs/push-development/` 下的 `run3-analysis.json`、`run3-analysis-keyframes.jpg`。
+斜推角度指平移方向，不是最终物体朝向。两个目标选择案例使用同一 [`tabletop_push_choice.yaml`](../configs/scenes/tabletop_push_choice.yaml)，仅改变 `target_object` 绑定与目标位置；另一块积木作为规划碰撞物保留。这验证专家角色绑定和执行能力，尚不代表视觉策略能识别语言目标。
 
-位置变体验收使用 [`tabletop_push_varied.yaml`](../configs/scenes/tabletop_push_varied.yaml)，仅将积木初态采样范围改为 X ±1 cm、Y ±5 mm；目标、朝向和成功标准保持相同。在上述环境与资产就绪后，从仓库根目录运行：
-
-```bash
-python scripts/collect.py --collection configs/collection/push.yaml \
-  --scene configs/scenes/tabletop_push_varied.yaml \
-  --output-dir outputs/push-varied --episode-id push-varied --seed 0 --episodes 3
-python scripts/inspect_data.py index outputs/push-varied \
-  --output outputs/push-varied/index.jsonl
-```
-
-固定初态与 seed 0–2 的三个位置变体均通过当前判据和视频完整性校验，最终位置误差为 1.09–2.05 mm、姿态误差为 0.49–2.45°；固定案例物理重放通过，积木最大位置差约 0.006 mm。汇总位于 `outputs/push-development/summary.json`，视频和失败记录说明见该目录的 `README.md`。这只覆盖当前四个案例，不代表整个采样范围、其他本体或主动转向已验收。测试为 178 项通过（含真实 GPU 接触步进与碰撞拒绝），Ruff 检查通过。
-
-朝向变体使用 [`tabletop_push_yaw_positive.yaml`](../configs/scenes/tabletop_push_yaw_positive.yaml)（初始 +20°）和 [`tabletop_push_yaw_negative.yaml`](../configs/scenes/tabletop_push_yaw_negative.yaml)（初始 −20°）。目标仍为原位置、0°，位置与朝向容差保持不变。沿用本节运行环境，在仓库根目录执行：
+从仓库根目录、上述环境就绪后，一条命令即可运行任一变体，例如：
 
 ```bash
-for sign in positive negative; do
-  python scripts/collect.py --collection configs/collection/push.yaml \
-    --scene configs/scenes/tabletop_push_yaw_${sign}.yaml \
-    --output-dir outputs/push-yaw --episode-id yaw-${sign} --seed 0
-  python scripts/inspect_data.py episode outputs/push-yaw/episodes/yaw-${sign}
-done
+python scripts/collect.py --collection configs/collection/push_diagonal_positive.yaml \
+  --output-dir outputs/push-variants --episode-id diagonal-positive --seed 0
+python scripts/inspect_data.py episode outputs/push-variants/episodes/diagonal-positive
 ```
 
-两例均期望 `success`、`video_error=null`；视频在 `outputs/push-yaw/videos/`。本次验收及失败对照保存在 `outputs/push-orientation/`：
+视频为 `outputs/push-variants/videos/diagonal-positive.mp4`，检查成功原因和位置误差；目标选择案例还应查看 `non_target_max_xy_displacement_m` 和腕部视频。非目标物位移目前是诊断指标，没有新增一个未经讨论的位移成功阈值。默认固定初态不会随 seed 改变布局；需要小范围初态采样时，附加 `--scene configs/scenes/tabletop_push_varied.yaml --episodes 3`（用于单积木案例）。
 
-| 控制与初态 | 结果 | 最终位置误差 | 最终朝向误差 |
-| --- | --- | --- | --- |
-| 原直推，+10° / −10° | 均成功 | 5.42 / 4.57 mm | 0.31 / 1.33° |
-| 原直推，+20° / −20° | 均因侧向偏移失败 | 10.72 / 10.48 mm | 0.06 / 1.39° |
-| 加入侧向修正，+20° / −20° | 均成功，215 步 | 1.60 / 1.67 mm | 0.05 / 1.43° |
-| 原直推，初始 0°、目标 +10° | 300 步超时 | 1.09 mm | 10.49° |
+Collection 的可选 `task_parameters` 覆盖所引用任务的已有参数，例如 `target_position: [0.05, -0.07]`；未知参数名直接报错。阈值继续只在任务 YAML 中维护，最终合并参数写入 Episode，无需手动生成完整配置。
 
-修正后的两例均在第 211–215 帧退离接触后成功；20 Hz 记录中无夹持，积木最低点相对桌面在 −0.22 至 −0.14 mm。证据包括 `corrected/videos/yaw-plus20.mp4`、`corrected/videos/yaw-minus20.mp4` 及目录下 `corrected-*-keyframes.jpg`、`corrected-*.json`。新增侧向反馈后，基础直推回归成功（位置误差 1.05 mm、朝向误差 0.48°）；+20° 物理重放通过，物体最大位置差 0.029 mm、角度差 0.065°。本轮 8 回合离线判据复核与记录结果一致，推动判据测试 8 项和控制器 Ruff 检查通过。这些是固定初态的少量验证，不代表连续角度范围、位置与朝向联合随机化或其他物体已通过。初始纠偏成功也不代表能够到达任意目标朝向；下一步需围绕接触方向／作用点设计主动转向，并继续同时检查位置误差。
+### 判据、专家与边界
 
-实现入口为 [`tasks/push.py`](../src/loom_env/tasks/push.py)、[`experts/push.py`](../src/loom_env/experts/push.py) 和 [`experts/curobo.py`](../src/loom_env/experts/curobo.py) 的 `cartesian_step`。失败时先检查 Episode 结果、阶段事件和腕部视频：区分未接触、侧向偏离、跟踪误差、碰撞约束拒绝及任务判据失败；保留失败回合，不修改物体摩擦或碰撞来掩盖问题。
+- `target_position` 是工作区局部 XY，圆区半径 `position_tolerance=0.01 m`。检查积木位姿原点进入圆区，不要求整个积木包含在圆内；圆区必须完整落在工作区内。
+- 初始物体必须受桌面支撑、未被夹持，并位于目标半径两倍以外。过程中需要实际手指接触（阈值 0.02 N），不得夹持、抬起或穿入支撑面超过 5 mm。发生这些失败后不能通过后续放回消除。
+- 接触后进入目标圆区并退离，两臂均无夹持、无推动接触的条件连续保持 0.25 s 才成功。不以低速度作为验收门槛。
+- 专家闭合夹爪，使用 cuRobo 接近并下降，以约 2 cm/s 推进；夹爪朝向对齐初始平移方向并固定，侧向位置反馈增益 0.5 s⁻¹、最高 5 mm/s。接触和运动由 PhysX 计算；桌子、非目标物、另一臂及自碰撞检查保留。
+
+当前范围是 Panda 右臂、已有积木和无障碍直线路径。没有绕障、多次换接触点或指定朝向能力。任务不再接受旧 `target_yaw`／`angle_tolerance` 参数。早期朝向控制实验保留在 `outputs/push-steering/`，其记录含旧判据，需使用当时的任务代码才能重算或重放；不能拿旧实验结果充当当前实现验收。
+
+2026-09-15 首批 7 个固定案例全部成功，最终位置误差 1.03–1.56 mm；20 Hz 记录中均无夹持，积木最低点相对桌面约 −0.22 至 −0.14 mm。两个目标选择案例中，非目标积木最大 XY 位移均小于 0.001 mm。三路视频完整性和逐帧离线成功判据复核均通过；斜推物理重放通过，积木最大位置差约 0.014 mm。完整测试 188 项通过，Ruff 检查通过。这些是固定案例证据，尚未验证连续采样范围或其他物体。
+
+本机证据索引为 `outputs/simple-push/README.md`，测量为 `summary.json`，对照图为 `push-*-keyframes.jpg`，视频在 `run/videos/`。这些产物被 Git 忽略，其他机器需按上述命令重新生成。对照图中的绿色圆是额外诊断标记，原始相机视频没有叠加目标；目标信息由任务配置提供，尚未加入 Policy 的视觉观测。
+
+实现入口为 [`tasks/push.py`](../src/loom_env/tasks/push.py)、[`experts/push.py`](../src/loom_env/experts/push.py) 和 [`experts/curobo.py`](../src/loom_env/experts/curobo.py) 的 `cartesian_step`。失败时先检查回合结果、阶段事件与腕部视频，区分接近规划、未接触、侧向偏离、跟踪误差及判据失败；保留失败回合，不修改摩擦或碰撞来掩盖问题。
 
 ## 运动预览
 

@@ -27,6 +27,8 @@ class AssetDefinition:
     tabletop_bounds: (
         tuple[tuple[float, float, float], tuple[float, float, float]] | None
     ) = None
+    # Reviewed closed-Panda finger centre height above the supporting plane.
+    push_height: float | None = None
     source_scale: float = 1.0
     source_translation: tuple[float, float, float] = (0.0, 0.0, 0.0)
 
@@ -73,6 +75,7 @@ ASSETS = {
         ((-0.03022, -0.01450, -0.01220), (0.03016, 0.01456, 0.01220)),
         dynamic=True,
         grasp=(0.0, 0.0, 0.002),
+        push_height=0.016,
     ),
     "robodojo:basket": AssetDefinition(
         "basket",
@@ -84,6 +87,52 @@ ASSETS = {
         ((-0.12601, -0.08401, -0.03857), (0.12601, 0.08401, 0.03844)),
         dynamic=True,
         interior=((0.0, 0.0, 0.00435), (0.20, 0.12, 0.0675)),
+    ),
+    "robodojo:plate": AssetDefinition(
+        "plate",
+        "https://huggingface.co/datasets/RoboDojo-Benchmark/RoboDojo",
+        "a14409d7fae673c00499e01fd88b4457df6351b1",
+        "RoboDojo/Assets/Object/RoboDojo/Rigid/plate/00002/object.usdz",
+        "c63472e16a20fb12e856d89c4f92e33546677285124838766c6555f8abfbf473",
+        "graspable_object",
+        (
+            (-0.06484473496675491, -0.06470753252506256, -0.017830800265073776),
+            (0.0647168755531311, 0.06483729928731918, 0.017830800265073776),
+        ),
+        dynamic=True,
+        push_height=0.016,
+    ),
+    "robodojo:box": AssetDefinition(
+        "box",
+        "https://huggingface.co/datasets/RoboDojo-Benchmark/RoboDojo",
+        "a14409d7fae673c00499e01fd88b4457df6351b1",
+        "RoboDojo/Assets/Object/RoboDojo/Rigid/box/00000/object.usdz",
+        "99b2b4bd8e536a465153eed6d1cd0a94962b099b9ad1292594b6e850000097bc",
+        "graspable_object",
+        (
+            (-0.08399545401334763, -0.15063320100307465, -3.3527612686157227e-08),
+            (0.08600454777479172, 0.1406424343585968, 0.18181779980659485),
+        ),
+        dynamic=True,
+        push_height=0.08,
+    ),
+    "loom:storage_zone": AssetDefinition(
+        "storage_zone",
+        "loom-env",
+        "1",
+        "configs/assets/regions/storage_zone.usda",
+        "37f3041edcd2798fe938ebb3618ba51ea0424bff4d04f47219bb525badc62839",
+        "target_region",
+        ((-0.14, -0.19, 0.0002), (0.14, 0.19, 0.0004)),
+    ),
+    "loom:placemat": AssetDefinition(
+        "placemat",
+        "loom-env",
+        "1",
+        "configs/assets/regions/placemat.usda",
+        "cdfff685e509764b45a18621602413aa7cb107861e3cc8ca4d8c4c80ffa5045c",
+        "target_region",
+        ((-0.11, -0.11, 0), (0.11, 0.11, 0.001)),
     ),
 }
 PREPARATION_VERSION = 5

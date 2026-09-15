@@ -1,0 +1,15 @@
+id: push_into_region
+instruction: 沿桌面推动{target_object}，使其完全进入{target_region}，然后退开夹爪。
+roles:
+  target_object: graspable_object
+  target_region: target_region
+required_capabilities: [push]
+parameters:
+  hold_time: 0.25
+  failure_drop: 0.15
+  # Used by the expert to approach the region centre; success uses full containment.
+  position_tolerance: 0.01
+  max_clearance: 0.005
+  contact_force: 0.02
+  # Limit roll/pitch to 15 degrees throughout the episode; yaw is free.
+  max_tilt: 0.2617993877991494

@@ -97,11 +97,12 @@ def sample_objects(scene, seed):
                 raise ValueError(f"Object extends outside workspace: {name}")
             if not -0.0001 <= lower[2] <= 0.01:
                 raise ValueError(f"Object is not supported by workspace: {name}")
-            if all(
+            if asset.category == "target_region" or all(
                 np.any(upper[:2] + 0.02 < a) or np.any(lower[:2] - 0.02 > b)
                 for a, b in occupied
             ):
-                occupied.append((lower[:2].copy(), upper[:2].copy()))
+                if asset.category != "target_region":
+                    occupied.append((lower[:2].copy(), upper[:2].copy()))
                 poses[name] = transform(frame, local)
                 break
         else:

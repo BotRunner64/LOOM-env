@@ -1,0 +1,9 @@
+task: ../tasks/push_into_region.yaml
+deployment: ../deployments/dual_panda.yaml
+scene: ../scenes/desk_box.yaml
+role_bindings:
+  target_object: box
+  target_region: storage
+arm_roles:
+  manipulator: right
+max_steps: 650

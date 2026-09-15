@@ -30,6 +30,8 @@ class ArmPlanner:
         self.meshes = {}
         for name, obj in scene.objects.items():
             vertices, faces = collision_mesh(asset_root, obj["asset"])
+            if len(faces) == 0:
+                continue
             self.meshes[name] = Mesh(
                 name=name,
                 vertices=vertices.tolist(),
@@ -115,7 +117,7 @@ class ArmPlanner:
                 self._box(f"held_{i}", [2 * sphere[3]] * 3, np.r_[center, [0, 0, 0, 1]])
             )
         meshes = []
-        for name in self.scene.objects:
+        for name in self.meshes:
             mesh = copy(self.meshes[name])
             local = self._local_pose(truth[f"{name}/pose_world"])
             mesh.pose = local[[0, 1, 2, 6, 3, 4, 5]].tolist()

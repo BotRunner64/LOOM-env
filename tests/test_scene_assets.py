@@ -129,3 +129,31 @@ def test_tabletop_replacement_preserves_lower_geometry():
     assert slab.is_watertight
     with pytest.raises(ValueError, match="one tabletop"):
         table_collision_parts(source.vertices, source.faces, top.bounds + 0.1)
+
+
+@pytest.mark.parametrize("key", ["loom:placemat", "loom:storage_zone"])
+def test_region_preparation_matches_physics_and_planner_geometry(
+    tmp_path, monkeypatch, key
+):
+    pytest.importorskip("pxr.Usd")
+    import numpy as np
+    from pxr import Usd, UsdPhysics
+    from loom_env.assets import prepare
+    from loom_env.assets.catalog import collision_mesh
+
+    asset = asset_definition(key)
+    monkeypatch.setattr(prepare, "ASSETS", {key: asset})
+    prepare.prepare_scene_assets(tmp_path, tmp_path)
+    stage = Usd.Stage.Open(str(prepared_directory(tmp_path, key) / "asset.usda"))
+    colliders = [p for p in stage.Traverse() if p.HasAPI(UsdPhysics.CollisionAPI)]
+    vertices, faces = collision_mesh(tmp_path, key)
+    if key == "loom:placemat":
+        assert len(colliders) == 1
+        assert len(faces) == 12
+        np.testing.assert_allclose(
+            [vertices.min(0), vertices.max(0)], asset.bounds, atol=1e-8
+        )
+    else:
+        assert not colliders
+        assert vertices.shape == faces.shape == (0, 3)
+    assert load_prepared(tmp_path, key)["source_physics_preserved"]

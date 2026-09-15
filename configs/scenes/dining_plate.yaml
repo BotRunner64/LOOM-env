@@ -1,0 +1,23 @@
+id: dining_plate
+objects:
+  table:
+    asset: maniskill:table
+    category: workspace
+    description: 木质餐桌
+    static: true
+    pose: [0, 0, 0, 0, 0, 0, 1]
+  plate:
+    asset: robodojo:plate
+    category: graspable_object
+    description: 黑白花纹浅盘
+    static: false
+    pose: [-0.10, -0.12, 0.0228308, 0, 0, 0, 1]
+  placemat:
+    asset: loom:placemat
+    category: target_region
+    description: 绿色餐垫
+    static: true
+    pose: [0.13, -0.12, 0, 0, 0, 0, 1]
+parameters:
+  workspace_pose: [0.45, 0, 0.75, 0, 0, 0, 1]
+  workspace_size: [0.96, 1.9]

@@ -43,6 +43,10 @@ def main():
             report["error"] = str(error)
         frame = env.frame()
         report["world_state"] = {k: v.tolist() for k, v in frame.world_state.items()}
+        report["body_mass_kg"] = {
+            name: env.scene[f"object_{name}"].data.body_mass.torch.cpu().tolist()
+            for name in env.object_names
+        }
         report["robot"] = {
             k: v.tolist()
             for k, v in frame.observation.values.items()

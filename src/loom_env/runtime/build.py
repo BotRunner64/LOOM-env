@@ -8,6 +8,7 @@ EXPERTS = {
     "put_object_in_container": PickPlaceExpert,
     "lift_object": LiftExpert,
     "push_object": PushExpert,
+    "push_into_region": PushExpert,
 }
 
 

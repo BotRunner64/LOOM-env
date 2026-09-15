@@ -1,0 +1,10 @@
+task: ../tasks/push_object.yaml
+deployment: ../deployments/dual_panda.yaml
+scene: ../scenes/tabletop_push_choice.yaml
+role_bindings:
+  target_object: far_block
+arm_roles:
+  manipulator: right
+max_steps: 650
+task_parameters:
+  target_position: [0.05, -0.04]

@@ -1,16 +1,14 @@
 id: push_object
-instruction: 沿桌面推动{target_object}到指定位置并保持目标朝向，然后退开夹爪。
+instruction: 沿桌面推动{target_object}进入目标区域，然后退开夹爪。
 roles:
   target_object: graspable_object
 required_capabilities: [push]
 parameters:
-  # Target object origin XY and yaw, relative to the scene workspace frame.
+  # Goal centre XY in the workspace frame; object yaw is unconstrained.
   target_position: [0.05, -0.10]
-  target_yaw: 0.0
   hold_time: 0.25
   failure_drop: 0.15
   position_tolerance: 0.01
-  angle_tolerance: 0.08726646259971647
   max_clearance: 0.005
   # Sliding contact is about 0.17 N for the reviewed brick; separate it from zero force.
   contact_force: 0.02

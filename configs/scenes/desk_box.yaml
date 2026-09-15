@@ -1,0 +1,23 @@
+id: desk_box
+objects:
+  table:
+    asset: maniskill:table
+    category: workspace
+    description: 木质桌面
+    static: true
+    pose: [0, 0, 0, 0, 0, 0, 1]
+  box:
+    asset: robodojo:box
+    category: graspable_object
+    description: 打开的纸盒
+    static: false
+    pose: [-0.10, -0.12, 0.005, 0, 0, 0, 1]
+  storage:
+    asset: loom:storage_zone
+    category: target_region
+    description: 蓝色标线围成的收纳区
+    static: true
+    pose: [0.13, -0.12, 0, 0, 0, 0, 1]
+parameters:
+  workspace_pose: [0.45, 0, 0.75, 0, 0, 0, 1]
+  workspace_size: [0.96, 1.9]

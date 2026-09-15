@@ -1,45 +1,38 @@
-"""Push a supported object to a workspace-relative pose without grasping it."""
+"""Push a supported object into a workspace-relative goal region without grasping."""
 
 import math
 
 import numpy as np
-from scipy.spatial.transform import Rotation
 
-from loom_env.scenes.workspace import corners, transform, workspace
+from loom_env.scenes.workspace import transform, workspace
 from loom_env.specs.config import pose, vector
 from loom_env.specs.episode import Outcome, TaskStatus
 from .object_task import ObjectTask
 
 
 class PushTask(ObjectTask):
+    thresholds = ("position_tolerance", "max_clearance", "contact_force")
+    goal_parameters = ("target_position",)
+
     def __init__(self, collection):
         super().__init__(
             collection,
-            ("position_tolerance", "angle_tolerance", "max_clearance", "contact_force"),
-            ("target_position", "target_yaw"),
+            self.thresholds,
+            self.goal_parameters,
         )
+        self.configure_goal(collection)
+        self.contact_seen = False
+        self.failure = None
+
+    def configure_goal(self, collection):
         if set(collection.role_bindings) != {"target_object"}:
             raise ValueError("Push requires only target_object")
         position = vector(self.parameters["target_position"], 2, "target_position")
-        yaw = self.parameters["target_yaw"]
-        if (
-            isinstance(yaw, bool)
-            or not isinstance(yaw, (float, int))
-            or not math.isfinite(yaw)
-        ):
-            raise ValueError("target_yaw must be a finite angle in radians")
         frame, size = workspace(collection.scene)
-        local_rotation = Rotation.from_euler("z", yaw)
-        rotated = local_rotation.apply(corners(self.asset))
-        if np.any(rotated[:, :2] + position < -size / 2) or np.any(
-            rotated[:, :2] + position > size / 2
-        ):
-            raise ValueError("Push target extends outside the workspace")
-        self.target_pose = transform(
-            frame, [*position, -rotated[:, 2].min(), *local_rotation.as_quat()]
-        )
-        self.contact_seen = False
-        self.failure = None
+        if np.any(np.abs(position) + self.parameters["position_tolerance"] > size / 2):
+            raise ValueError("Push goal region extends outside the workspace")
+        # The goal is a circle on the support plane, independent of object yaw.
+        self.target_position_world = transform(frame, [*position, 0, 0, 0, 0, 1])[:3]
 
     def metrics(self, world):
         points, grasped = self._state(world)
@@ -49,14 +42,10 @@ class PushTask(ObjectTask):
             raise ValueError(
                 "Push requires finite contact forces for both arms and fingers"
             )
-        rotation_error = Rotation.from_quat(
-            self.target_pose[3:]
-        ).inv() * Rotation.from_quat(measured[3:])
         return {
             "position_error": float(
-                np.linalg.norm(measured[:2] - self.target_pose[:2])
+                np.linalg.norm(measured[:2] - self.target_position_world[:2])
             ),
-            "angle_error": float(rotation_error.magnitude()),
             "clearance": float(points[:, 2].min() - self.support[2]),
             "contact_force": float(np.linalg.norm(forces, axis=-1).max()),
             "grasped": bool(grasped.any()),
@@ -67,7 +56,9 @@ class PushTask(ObjectTask):
         self.contact_seen = False
         self.failure = None
         metrics = self.metrics(initial_state)
-        if metrics["position_error"] <= 2 * self.parameters["position_tolerance"]:
+        if metrics["position_error"] <= 2 * self.parameters[
+            "position_tolerance"
+        ] or self.at_goal(metrics):
             raise ValueError(
                 "Push initial object must start outside twice the goal tolerance"
             )
@@ -81,21 +72,25 @@ class PushTask(ObjectTask):
         if not math.isfinite(dt) or dt <= 0:
             raise ValueError("Task dt must be finite and positive")
         m = self.metrics(world_state)
-        if m["grasped"]:
-            self.failure = "push_object_grasped"
-        elif m["clearance"] > self.parameters["max_clearance"]:
-            self.failure = "push_object_lifted"
-        elif m["clearance"] < -self.parameters["max_clearance"]:
-            self.failure = "push_object_below_support"
+        self.failure = self.failure_reason(m) or self.failure
         if self.failure is not None:
             return TaskStatus(Outcome("task_failure", self.failure))
         contact = m["contact_force"] > self.parameters["contact_force"]
         self.contact_seen |= contact
-        condition = (
-            self.contact_seen
-            and not contact
-            and m["position_error"] <= self.parameters["position_tolerance"]
-            and m["angle_error"] <= self.parameters["angle_tolerance"]
-        )
+        condition = self.contact_seen and not contact and self.at_goal(m)
         points, _ = self._state(world_state)
-        return self.finish(points, condition, dt, "object_pushed_to_pose_and_released")
+        return self.finish(
+            points, condition, dt, "object_pushed_to_region_and_released"
+        )
+
+    def at_goal(self, metrics):
+        return metrics["position_error"] <= self.parameters["position_tolerance"]
+
+    def failure_reason(self, metrics):
+        if metrics["grasped"]:
+            return "push_object_grasped"
+        if metrics["clearance"] > self.parameters["max_clearance"]:
+            return "push_object_lifted"
+        if metrics["clearance"] < -self.parameters["max_clearance"]:
+            return "push_object_below_support"
+        return None

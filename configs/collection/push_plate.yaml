@@ -1,0 +1,9 @@
+task: ../tasks/push_into_region.yaml
+deployment: ../deployments/dual_panda.yaml
+scene: ../scenes/dining_plate.yaml
+role_bindings:
+  target_object: plate
+  target_region: placemat
+arm_roles:
+  manipulator: right
+max_steps: 650
