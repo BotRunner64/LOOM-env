@@ -2,10 +2,12 @@
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import numpy as np
+
+PREPARATION_VERSION = 3
 
 
 @dataclass(frozen=True)
@@ -29,13 +31,33 @@ class AssetDefinition:
     ) = None
     # Reviewed closed-Panda finger centre height above the supporting plane.
     push_height: float | None = None
+    # Object-local giver/receiver centres and local long axis for handover.
+    handover: tuple[tuple[float, float, float], tuple[float, float, float]] | None = (
+        None
+    )
+    handover_axis: tuple[float, float, float] | None = None
     source_scale: float = 1.0
     source_translation: tuple[float, float, float] = (0.0, 0.0, 0.0)
 
 
-
 TABLE_SCALE = 0.75 / 0.5255104303359985
 ASSETS = {
+    "robodojo:tea_carton_pack": AssetDefinition(
+        "tea_carton_pack",
+        "https://huggingface.co/datasets/RoboDojo-Benchmark/RoboDojo",
+        "a14409d7fae673c00499e01fd88b4457df6351b1",
+        "RoboDojo/Assets/Object/RoboDojo/Clutter/tissue/00001/object.usda",
+        "ea6363be9f8f1469c1a9e2a9ead5a857677f6ad726f30a7c728f6edb8c2380a3",
+        "graspable_object",
+        (
+            (-0.1602, -0.0268, -0.0411),
+            (0.1598, 0.0271, 0.0403),
+        ),
+        dynamic=True,
+        grasp=(0.12, 0.0, 0.0),
+        handover=((0.12, 0.0, 0.0), (-0.02, 0.0, 0.0)),
+        handover_axis=(1.0, 0.0, 0.0),
+    ),
     "maniskill:table": AssetDefinition(
         "table",
         "https://github.com/haosulab/ManiSkill",
@@ -64,8 +86,8 @@ ASSETS = {
         "brick",
         "https://huggingface.co/datasets/RoboDojo-Benchmark/RoboDojo",
         "a14409d7fae673c00499e01fd88b4457df6351b1",
-        "RoboDojo/Assets/Object/RoboDojo/Rigid/brick/00000/object.usdz",
-        "539abd853016ba9c85d1ba2d943bd6edc208e8f0388892203bef470e36bc597a",
+        "RoboDojo/Assets/Object/RoboDojo/Rigid/brick/00000/object.usda",
+        "1e45a258dc8219d1a3ee34ea389b7aef48dd963c0f2ef579f69b4c190e0999f8",
         "graspable_object",
         ((-0.03022, -0.01450, -0.01220), (0.03016, 0.01456, 0.01220)),
         dynamic=True,
@@ -76,8 +98,8 @@ ASSETS = {
         "basket",
         "https://huggingface.co/datasets/RoboDojo-Benchmark/RoboDojo",
         "a14409d7fae673c00499e01fd88b4457df6351b1",
-        "RoboDojo/Assets/Object/RoboDojo/Geometry/basket/00002/object.usdz",
-        "437f8357aba77943b451b57e0848d91a8d77cd6a00af367111cde21beac6548e",
+        "RoboDojo/Assets/Object/RoboDojo/Geometry/basket/00002/object.usda",
+        "cb916c49fa7eb221674cfc20ce169b94544d50c86a940027b5e7e13e1014d5f4",
         "receptacle",
         ((-0.12601, -0.08401, -0.03857), (0.12601, 0.08401, 0.03844)),
         dynamic=True,
@@ -87,8 +109,8 @@ ASSETS = {
         "plate",
         "https://huggingface.co/datasets/RoboDojo-Benchmark/RoboDojo",
         "a14409d7fae673c00499e01fd88b4457df6351b1",
-        "RoboDojo/Assets/Object/RoboDojo/Rigid/plate/00002/object.usdz",
-        "c63472e16a20fb12e856d89c4f92e33546677285124838766c6555f8abfbf473",
+        "RoboDojo/Assets/Object/RoboDojo/Rigid/plate/00002/object.usda",
+        "e0366c5c58361b7abf03031179cebbb637dad92834ccb126ec342d4159cc70ee",
         "graspable_object",
         (
             (-0.06484473496675491, -0.06470753252506256, -0.017830800265073776),
@@ -101,8 +123,8 @@ ASSETS = {
         "box",
         "https://huggingface.co/datasets/RoboDojo-Benchmark/RoboDojo",
         "a14409d7fae673c00499e01fd88b4457df6351b1",
-        "RoboDojo/Assets/Object/RoboDojo/Rigid/box/00000/object.usdz",
-        "99b2b4bd8e536a465153eed6d1cd0a94962b099b9ad1292594b6e850000097bc",
+        "RoboDojo/Assets/Object/RoboDojo/Rigid/box/00000/object.usda",
+        "bb17c66674dd2bf0fc4a210ce1d3c59b4e4df2eb9cb5bbe3387af355e4c3b020",
         "graspable_object",
         (
             (-0.08399545401334763, -0.15063320100307465, -3.3527612686157227e-08),
@@ -125,7 +147,7 @@ ASSETS = {
         "loom-env",
         "1",
         "configs/assets/regions/placemat.usda",
-        "cdfff685e509764b45a18621602413aa7cb107861e3cc8ca4d8c4c80ffa5045c",
+        "4e15f0b9800f3610299b0ab2647c89b0ad5bd1aec1f9ad86dcc447f1378d3eb4",
         "target_region",
         ((-0.11, -0.11, 0), (0.11, 0.11, 0.001)),
     ),
@@ -157,6 +179,16 @@ def load_prepared(root, asset_id):
             f"Unprepared asset {asset_id}; run scripts/prepare_assets.py scene"
         )
     manifest = json.loads(path.read_text())
+    if manifest.get("preparation_version") != PREPARATION_VERSION:
+        raise ValueError(
+            f"Obsolete prepared asset {asset_id}; run scripts/prepare_assets.py scene"
+        )
+    if manifest.get("source") != json.loads(
+        json.dumps(asdict(asset_definition(asset_id)))
+    ):
+        raise ValueError(
+            f"Prepared definition changed for {asset_id}; run scripts/prepare_assets.py scene"
+        )
     if not {"asset.usda", "collision.npz"} <= manifest.get("files", {}).keys():
         raise ValueError(f"Incomplete prepared asset: {asset_id}")
     for relative, expected in manifest["files"].items():

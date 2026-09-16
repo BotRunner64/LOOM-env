@@ -1,0 +1,13 @@
+id: handover_object
+instruction: 将{target_object}交给另一只手，并由接收手独立拿稳。
+roles:
+  target_object: graspable_object
+required_capabilities: [grasp]
+parameters:
+  hold_time: 0.25
+  failure_drop: 0.05
+  clearance: 0.04
+  transfer_distance: 0.05
+  stable_time: 1.0
+  linear_speed: 0.02
+  angular_speed: 0.1

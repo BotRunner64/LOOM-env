@@ -1,0 +1,39 @@
+#usda 1.0
+(
+    customLayerData = {
+        string source_sha256 = "7d93d01f03d95731e2031d45cbce63fa8be28ca040cdd694605953007a9bde12"
+    }
+    defaultPrim = "Asset"
+    metersPerUnit = 1
+    upAxis = "Z"
+)
+
+def Xform "Asset" (
+    prepend apiSchemas = ["PhysicsMassAPI"]
+    prepend references = @object.usdz@
+)
+{
+    float physics:mass = 0.22
+
+    def Material "LoomPhysics" (
+        prepend apiSchemas = ["PhysicsMaterialAPI"]
+    )
+    {
+        float physics:dynamicFriction = 0.38
+        float physics:restitution = 0
+        float physics:staticFriction = 0.38
+    }
+
+    over "collision"
+    {
+        over "model" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        )
+        {
+            rel material:binding:physics = </Asset/LoomPhysics> (
+                bindMaterialAs = "strongerThanDescendants"
+            )
+        }
+    }
+}
+

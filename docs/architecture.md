@@ -35,6 +35,8 @@ flowchart LR
 
 环境负责创建实体和重置初态；执行器只提供动作；任务判据独立于专家。数据保留输入动作、测量状态、时间戳与配置，规划成功不能代替实际任务成功。
 
+交接任务用 `giver`／`receiver` 绑定不同操作臂。组装入口为它创建两个单臂规划器，专家按物理反馈依次协调两臂；任务检查器从接触与物体位姿历史判断交接，不读取专家阶段。专家的 `close()` 释放其拥有的规划器，采集入口无需知道规划器数量。专家仍实现统一 `ActionSource.reset/act`；尚未引入通用技能状态机或动作流程配置语言。
+
 ## 代码入口
 
 以下路径相对 [`src/loom_env/`](../src/loom_env)：
@@ -48,4 +50,4 @@ flowchart LR
 | 组件组装、执行循环 | `runtime/build.py`、`runtime/runner.py`；接口在 `runtime/protocols.py` |
 | 轨迹读写与校验 | `data/`，可独立于仿真使用 |
 
-命令入口在 `scripts/`，依赖在 `pyproject.toml`。随[任务与场景拓展](expansion-plan.md)检查 `runtime/build.py` 中对抓放角色的假设，以及部署与本体定义的重复，按具体案例需要整理；进度统一见 [README](../README.md#当前进度)。
+命令入口在 `scripts/`，依赖在 `pyproject.toml`。随[任务与场景拓展](expansion-plan.md)按具体案例检查组装入口的角色假设和部署与本体定义的重复；进度统一见 [README](../README.md#当前进度)。

@@ -1,4 +1,4 @@
-"""Reference pinned USD assets unchanged; convert mesh-only workspaces."""
+"""Prepare scene assets from complete USD physical definitions."""
 
 import importlib.metadata
 import json
@@ -10,7 +10,41 @@ from pathlib import Path
 
 import numpy as np
 
-from .catalog import ASSETS, prepared_directory, sha256
+from .catalog import ASSETS, PREPARATION_VERSION, prepared_directory, sha256
+
+
+def physics_properties(stage, root=None):
+    """Read the effective USD definition, without scene overrides."""
+    from pxr import Usd, UsdPhysics, UsdShade
+
+    root = stage.GetDefaultPrim() if root is None else root
+    result = {"materials": {}}
+    if root.HasAPI(UsdPhysics.RigidBodyAPI):
+        mass = UsdPhysics.MassAPI(root).GetMassAttr().Get()
+        if mass is None or not np.isfinite(mass) or mass <= 0:
+            raise ValueError("Prepared dynamic USD must have an explicit positive mass")
+        result["mass_kg"] = mass
+    for p in Usd.PrimRange(root, Usd.TraverseInstanceProxies()):
+        if not p.HasAPI(UsdPhysics.CollisionAPI):
+            continue
+        material, _ = UsdShade.MaterialBindingAPI(p).ComputeBoundMaterial("physics")
+        if not material or not material.GetPrim().HasAPI(UsdPhysics.MaterialAPI):
+            raise ValueError(f"Missing bound physics material: {p.GetPath()}")
+        api = UsdPhysics.MaterialAPI(material.GetPrim())
+        attrs = [
+            api.GetStaticFrictionAttr(),
+            api.GetDynamicFrictionAttr(),
+            api.GetRestitutionAttr(),
+        ]
+        if any(
+            not a.HasAuthoredValue() or not np.isfinite(a.Get()) or a.Get() < 0
+            for a in attrs
+        ):
+            raise ValueError(f"Incomplete physics material: {material.GetPath()}")
+        result["materials"][str(p.GetPath().MakeRelativePath(root.GetPath()))] = {
+            a.GetName().removeprefix("physics:"): a.Get() for a in attrs
+        }
+    return result
 
 
 def source_physics(stage):
@@ -95,10 +129,15 @@ def table_collision_parts(vertices, triangles, tabletop_bounds):
     return lower, slab
 
 
-def prepare_scene_assets(asset_root, source_root):
-    from pxr import Gf, Usd, UsdGeom, UsdPhysics
+def prepare_scene_assets(asset_root, source_root, asset_ids=None):
+    from pxr import Gf, Usd, UsdGeom, UsdPhysics, UsdShade, UsdUtils
 
-    for asset_id, definition in ASSETS.items():
+    selected = tuple(ASSETS) if asset_ids is None else tuple(dict.fromkeys(asset_ids))
+    unknown = set(selected) - ASSETS.keys()
+    if unknown:
+        raise ValueError(f"Unknown scene assets: {sorted(unknown)}")
+    for asset_id in selected:
+        definition = ASSETS[asset_id]
         origin = (
             Path(__file__).resolve().parents[3]
             if definition.source == "loom-env"
@@ -128,7 +167,23 @@ def prepare_scene_assets(asset_root, source_root):
         else:
             local = directory / ("source" + source.suffix)
             shutil.copyfile(source, local)
+            # Preserve relative USD dependencies. USDZ contents remain packaged.
+            layers, resources, _ = UsdUtils.ComputeAllDependencies(str(source))
+            for dependency in {x.identifier.split("[")[0] for x in layers} | {
+                x.split("[")[0] for x in resources
+            }:
+                member = Path(dependency).resolve()
+                if member == source.resolve():
+                    continue
+                if not member.is_relative_to(source.parent.resolve()):
+                    raise ValueError(f"Dependency outside asset directory: {member}")
+                target = directory / member.relative_to(source.parent.resolve())
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(member, target)
         source_stage = Usd.Stage.Open(str(local))
+        geometry_hash = source_stage.GetRootLayer().customLayerData.get("source_sha256")
+        if geometry_hash and sha256(directory / "object.usdz") != geometry_hash:
+            raise ValueError(f"Source geometry checksum mismatch: {asset_id}")
         if not mesh_only and (
             UsdGeom.GetStageUpAxis(source_stage) != "Z"
             or UsdGeom.GetStageMetersPerUnit(source_stage) != 1.0
@@ -215,21 +270,52 @@ def prepare_scene_assets(asset_root, source_root):
             )
         elif source_physics(stage) != source_physics(source_stage):
             raise ValueError(f"Imported USDZ physics differs from source: {asset_id}")
-        # References become relative only at export; source model bytes are intact.
-        reference_prim = model if mesh_only else root
+        if mesh_only:
+            # The mesh converter has no physics; use the authored workspace USD.
+            material_source = (
+                Path(__file__).resolve().parents[3]
+                / "configs/assets/materials/workspace.usda"
+            )
+            material_stage = Usd.Stage.Open(str(material_source))
+            from pxr import Sdf
+
+            Sdf.CopySpec(
+                material_stage.GetRootLayer(),
+                "/Material",
+                stage.GetRootLayer(),
+                "/Asset/LoomPhysics",
+            )
+            material = UsdShade.Material(stage.GetPrimAtPath("/Asset/LoomPhysics"))
+            for prim in stage.Traverse():
+                if prim.HasAPI(UsdPhysics.CollisionAPI):
+                    UsdShade.MaterialBindingAPI.Apply(prim).Bind(
+                        material,
+                        bindingStrength="strongerThanDescendants",
+                        materialPurpose="physics",
+                    )
+        expected_physics = physics_properties(stage)
+        # Resolve relative dependencies from the file-backed layer, not an
+        # anonymous stage. Source model bytes remain intact.
+        stage.GetRootLayer().Export(str(destination))
+        prepared = Usd.Stage.Open(str(destination))
+        reference_prim = prepared.GetPrimAtPath(
+            "/Asset/Model" if mesh_only else "/Asset"
+        )
         reference_prim.GetReferences().ClearReferences()
         reference_prim.GetReferences().AddReference(local.name)
-        stage.GetRootLayer().Export(str(destination))
+        prepared.GetRootLayer().Save()
         if not collision_prims:
             vertices = np.empty((0, 3))
             triangles = np.empty((0, 3), dtype=np.int32)
         np.savez_compressed(
             directory / "collision.npz", vertices=vertices, faces=triangles
         )
-        prepared = Usd.Stage.Open(str(destination))
-        if not mesh_only and source_physics(prepared) != source_physics(source_stage):
-            raise ValueError(f"Cached USDZ physics differs from source: {asset_id}")
+        if physics_properties(prepared) != expected_physics:
+            raise ValueError(
+                f"Cached USD physics differs from prepared definition: {asset_id}"
+            )
         manifest = {
+            "preparation_version": PREPARATION_VERSION,
             "asset_id": asset_id,
             "source": asdict(definition),
             "bounds": actual.tolist(),
@@ -238,7 +324,7 @@ def prepare_scene_assets(asset_root, source_root):
             if mesh_only
             else "source",
             "physics": source_physics(prepared),
-            "source_physics_preserved": not mesh_only,
+            "physics_properties": expected_physics,
             "versions": {
                 name: importlib.metadata.version(name)
                 for name in ("isaaclab", "isaacsim")

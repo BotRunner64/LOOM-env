@@ -4,12 +4,14 @@ from .lift import LiftTask
 from .place import PlaceTask
 from .push import PushTask
 from .push_region import PushIntoRegionTask
+from .handover import HandoverTask
 
 TASKS = {
     "put_object_in_container": PlaceTask,
     "lift_object": LiftTask,
     "push_object": PushTask,
     "push_into_region": PushIntoRegionTask,
+    "handover_object": HandoverTask,
 }
 
 

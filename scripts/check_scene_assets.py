@@ -47,6 +47,29 @@ def main():
             name: env.scene[f"object_{name}"].data.body_mass.torch.cpu().tolist()
             for name in env.object_names
         }
+        import numpy as np
+        import omni.usd
+        from loom_env.assets.prepare import physics_properties
+
+        stage = omni.usd.get_context().get_stage()
+        report["physics_checks"] = {}
+        for name, obj in collection.scene.objects.items():
+            expected = env.asset_manifests[obj["asset"]]["physics_properties"]
+            actual = physics_properties(
+                stage, stage.GetPrimAtPath(f"/World/envs/env_0/object_{name}")
+            )
+            passed = actual == expected
+            if name in report["body_mass_kg"]:
+                passed &= bool(
+                    np.allclose(
+                        report["body_mass_kg"][name], expected["mass_kg"], rtol=1e-5
+                    )
+                )
+            report["physics_checks"][name] = {
+                "passed": passed,
+                "usd": actual,
+            }
+            report["passed"] &= passed
         report["robot"] = {
             k: v.tolist()
             for k, v in frame.observation.values.items()

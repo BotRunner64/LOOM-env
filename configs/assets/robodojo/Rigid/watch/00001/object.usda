@@ -1,0 +1,174 @@
+#usda 1.0
+(
+    customLayerData = {
+        string source_sha256 = "f3cc7b021c6770469985bdcd66d83d5485adf71fd6cca340e6a87548172309c8"
+    }
+    defaultPrim = "Asset"
+    metersPerUnit = 1
+    upAxis = "Z"
+)
+
+def Xform "Asset" (
+    prepend apiSchemas = ["PhysicsMassAPI"]
+    prepend references = @object.usdz@
+)
+{
+    float physics:mass = 0.045
+
+    def Material "LoomPhysics" (
+        prepend apiSchemas = ["PhysicsMaterialAPI"]
+    )
+    {
+        float physics:dynamicFriction = 0.25
+        float physics:restitution = 0
+        float physics:staticFriction = 0.25
+    }
+
+    over "Wristwatch_TISSOT_1853___PR100"
+    {
+        over "second_hand"
+        {
+            over "Circle_001" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                rel material:binding:physics = </Asset/LoomPhysics> (
+                    bindMaterialAs = "strongerThanDescendants"
+                )
+            }
+        }
+
+        over "hour_hand"
+        {
+            over "Circle_004" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                rel material:binding:physics = </Asset/LoomPhysics> (
+                    bindMaterialAs = "strongerThanDescendants"
+                )
+            }
+        }
+
+        over "bracelet_002"
+        {
+            over "Cube_014" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                rel material:binding:physics = </Asset/LoomPhysics> (
+                    bindMaterialAs = "strongerThanDescendants"
+                )
+            }
+        }
+
+        over "minute_hand"
+        {
+            over "Circle_003" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                rel material:binding:physics = </Asset/LoomPhysics> (
+                    bindMaterialAs = "strongerThanDescendants"
+                )
+            }
+        }
+
+        over "bracelet_clasp_003"
+        {
+            over "BezierCircle_004" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                rel material:binding:physics = </Asset/LoomPhysics> (
+                    bindMaterialAs = "strongerThanDescendants"
+                )
+            }
+        }
+
+        over "adjustment_knob"
+        {
+            over "Cylinder_004" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                rel material:binding:physics = </Asset/LoomPhysics> (
+                    bindMaterialAs = "strongerThanDescendants"
+                )
+            }
+        }
+
+        over "casing"
+        {
+            over "Circle_006" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                rel material:binding:physics = </Asset/LoomPhysics> (
+                    bindMaterialAs = "strongerThanDescendants"
+                )
+            }
+        }
+
+        over "clock_face"
+        {
+            over "Circle" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                rel material:binding:physics = </Asset/LoomPhysics> (
+                    bindMaterialAs = "strongerThanDescendants"
+                )
+            }
+        }
+
+        over "bracelet_clasp_001"
+        {
+            over "BezierCircle_003" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                rel material:binding:physics = </Asset/LoomPhysics> (
+                    bindMaterialAs = "strongerThanDescendants"
+                )
+            }
+        }
+
+        over "bracelet_clasp_004"
+        {
+            over "Cylinder_003" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                rel material:binding:physics = </Asset/LoomPhysics> (
+                    bindMaterialAs = "strongerThanDescendants"
+                )
+            }
+        }
+
+        over "bracelet_clasp_002"
+        {
+            over "BezierCircle_005" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                rel material:binding:physics = </Asset/LoomPhysics> (
+                    bindMaterialAs = "strongerThanDescendants"
+                )
+            }
+        }
+
+        over "bracelet_001"
+        {
+            over "Cube_012" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                rel material:binding:physics = </Asset/LoomPhysics> (
+                    bindMaterialAs = "strongerThanDescendants"
+                )
+            }
+        }
+    }
+}
+

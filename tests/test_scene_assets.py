@@ -1,9 +1,11 @@
 import json
 import shutil
+from dataclasses import asdict
 
 import pytest
 
 from loom_env.assets.catalog import (
+    PREPARATION_VERSION,
     asset_definition,
     load_prepared,
     prepared_directory,
@@ -50,6 +52,8 @@ def prepared_fixture(root):
     for name in ("asset.usda", "collision.npz", "source.usdz"):
         (directory / name).write_bytes(b"integrity-test-content")
     manifest = {
+        "preparation_version": PREPARATION_VERSION,
+        "source": json.loads(json.dumps(asdict(asset_definition(key)))),
         "asset_id": key,
         "files": {
             name: sha256(directory / name)
@@ -83,9 +87,12 @@ def test_unusable_prepared_assets_are_rejected(tmp_path, change):
         load_prepared(tmp_path, key)
 
 
-def test_usdz_reference_preserves_authored_physics(tmp_path, monkeypatch):
+@pytest.mark.parametrize("layered", [False, True])
+def test_prepared_usd_preserves_source_physics(tmp_path, monkeypatch, layered):
+    from dataclasses import replace
+
     pytest.importorskip("pxr.Usd")
-    from pxr import Sdf, Usd, UsdGeom, UsdPhysics, UsdUtils
+    from pxr import Sdf, Usd, UsdGeom, UsdPhysics, UsdShade, UsdUtils
 
     from loom_env.assets import prepare
     from loom_env.assets.catalog import ASSETS, AssetDefinition
@@ -106,30 +113,64 @@ def test_usdz_reference_preserves_authored_physics(tmp_path, monkeypatch):
     UsdPhysics.MeshCollisionAPI.Apply(mesh.GetPrim()).CreateApproximationAttr(
         "convexDecomposition"
     )
+    material = UsdShade.Material.Define(stage, "/Source/Material")
+    api = UsdPhysics.MaterialAPI.Apply(material.GetPrim())
+    api.CreateStaticFrictionAttr(0.5)
+    api.CreateDynamicFrictionAttr(0.4)
+    api.CreateRestitutionAttr(0)
+    UsdShade.MaterialBindingAPI.Apply(mesh.GetPrim()).Bind(
+        material, materialPurpose="physics"
+    )
     stage.GetRootLayer().Save()
     archive = tmp_path / "fixture.usdz"
     assert UsdUtils.CreateNewUsdzPackage(Sdf.AssetPath(str(source)), str(archive))
+    entry = archive
+    if layered:
+        entry = tmp_path / "object.usda"
+        wrapper = Usd.Stage.CreateNew(str(entry))
+        wrapper_root = UsdGeom.Xform.Define(wrapper, "/Asset").GetPrim()
+        wrapper.SetDefaultPrim(wrapper_root)
+        UsdGeom.SetStageUpAxis(wrapper, "Z")
+        UsdGeom.SetStageMetersPerUnit(wrapper, 1.0)
+        wrapper_root.GetReferences().AddReference(archive.name)
+        wrapper.GetRootLayer().Save()
     asset = AssetDefinition(
         "fixture",
         "test-source",
         "test-revision",
-        archive.name,
-        sha256(archive),
+        entry.name,
+        sha256(entry),
         "graspable_object",
         ((0, 0, 0), (0.02, 0.02, 0.02)),
         dynamic=True,
     )
     monkeypatch.setitem(ASSETS, "test:fixture", asset)
-    monkeypatch.setattr(prepare, "ASSETS", {"test:fixture": asset})
-    prepare.prepare_scene_assets(tmp_path / "cache", tmp_path)
+    monkeypatch.setattr(
+        prepare,
+        "ASSETS",
+        {
+            "test:fixture": asset,
+            "test:unselected": replace(asset, name="unselected", path="missing.usdz"),
+        },
+    )
+    with pytest.raises(ValueError, match="Unknown scene assets"):
+        prepare.prepare_scene_assets(tmp_path / "cache", tmp_path, ["test:unknown"])
+    assert not (tmp_path / "cache").exists()
+    prepare.prepare_scene_assets(tmp_path / "cache", tmp_path, ["test:fixture"])
+    assert not (tmp_path / "cache/scenes/unselected").exists()
     directory = prepared_directory(tmp_path / "cache", "test:fixture")
     result = Usd.Stage.Open(str(directory / "asset.usda"))
-    original = Usd.Stage.Open(str(archive))
-    assert prepare.source_physics(result) == prepare.source_physics(original)
-    assert (directory / "source.usdz").read_bytes() == archive.read_bytes()
+    assert UsdPhysics.MassAPI(
+        result.GetDefaultPrim()
+    ).GetMassAttr().Get() == pytest.approx(0.123)
+    assert prepare.physics_properties(result)["materials"]["collision/model"][
+        "staticFriction"
+    ] == pytest.approx(0.5)
+    assert (
+        directory / (archive.name if layered else "source.usdz")
+    ).read_bytes() == archive.read_bytes()
     layer = result.GetRootLayer().ExportToString()
-    assert "physics:" not in layer
-    assert "PhysicsRigidBodyAPI" not in layer  # Inherited, never rewritten.
+    assert "physics:mass" not in layer
     assert (
         UsdPhysics.RigidBodyAPI(result.GetDefaultPrim()).GetRigidBodyEnabledAttr().Get()
     )
@@ -187,4 +228,68 @@ def test_region_preparation_matches_physics_and_planner_geometry(
     else:
         assert not colliders
         assert vertices.shape == faces.shape == (0, 3)
-    assert load_prepared(tmp_path, key)["source_physics_preserved"]
+    assert load_prepared(tmp_path, key)["preparation_version"] == PREPARATION_VERSION
+
+
+def test_incomplete_usd_physics_is_rejected():
+    from pxr import Usd, UsdGeom, UsdPhysics
+
+    from loom_env.assets.prepare import physics_properties
+
+    stage = Usd.Stage.CreateInMemory()
+    root = UsdGeom.Xform.Define(stage, "/Asset").GetPrim()
+    stage.SetDefaultPrim(root)
+    UsdPhysics.RigidBodyAPI.Apply(root)
+    UsdPhysics.CollisionAPI.Apply(UsdGeom.Cube.Define(stage, "/Asset/Body").GetPrim())
+    with pytest.raises(ValueError, match="explicit positive mass"):
+        physics_properties(stage)
+    UsdPhysics.MassAPI.Apply(root).CreateMassAttr(0.1)
+    with pytest.raises(ValueError, match="Missing bound physics material"):
+        physics_properties(stage)
+
+
+def test_old_physics_cache_requires_repreparation(tmp_path):
+    key, directory, manifest = prepared_fixture(tmp_path)
+    manifest.pop("preparation_version")
+    (directory / "asset.json").write_text(json.dumps(manifest))
+    with pytest.raises(ValueError, match="Obsolete"):
+        load_prepared(tmp_path, key)
+
+
+@pytest.mark.parametrize("missing", [None, "mass", "material", "second_body"])
+def test_library_checks_child_body_physics(tmp_path, missing):
+    import runpy
+    from pathlib import Path
+
+    from pxr import Usd, UsdGeom, UsdPhysics, UsdShade
+
+    inspect_asset = runpy.run_path(
+        str(Path(__file__).resolve().parents[1] / "scripts/check_asset_library.py")
+    )["inspect_asset"]
+    path = tmp_path / "child-body.usda"
+    stage = Usd.Stage.CreateNew(str(path))
+    root = UsdGeom.Xform.Define(stage, "/Object").GetPrim()
+    stage.SetDefaultPrim(root)
+    body = UsdGeom.Cube.Define(stage, "/Object/Body").GetPrim()
+    UsdPhysics.RigidBodyAPI.Apply(body)
+    UsdPhysics.CollisionAPI.Apply(body)
+    if missing != "mass":
+        UsdPhysics.MassAPI.Apply(body).CreateMassAttr(0.02)
+    if missing != "material":
+        material = UsdShade.Material.Define(stage, "/Object/Material")
+        api = UsdPhysics.MaterialAPI.Apply(material.GetPrim())
+        api.CreateStaticFrictionAttr(0.5)
+        api.CreateDynamicFrictionAttr(0.4)
+        api.CreateRestitutionAttr(0)
+        UsdShade.MaterialBindingAPI.Apply(body).Bind(
+            material, materialPurpose="physics"
+        )
+    if missing == "second_body":
+        UsdPhysics.RigidBodyAPI.Apply(
+            UsdGeom.Cube.Define(stage, "/Object/Other").GetPrim()
+        )
+    stage.GetRootLayer().Save()
+    result = inspect_asset(path, dynamic=True)
+    assert result["status"] == ("ready" if missing is None else "pending")
+    if missing is None:
+        assert result["physics"]["mass_kg"] == pytest.approx(0.02)

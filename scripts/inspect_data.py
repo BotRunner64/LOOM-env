@@ -54,6 +54,59 @@ def main():
                     "camera_videos",
                 )
             }
+            if manifest["spec"]["collection"]["task"]["id"] == "handover_object":
+                import numpy as np
+
+                from loom_env.data.episodes import EpisodeReader
+                from loom_env.tasks import create_task
+
+                with EpisodeReader(args.path) as reader:
+                    task = create_task(reader.spec.collection)
+                    task.reset(reader.world_state(0))
+                    transitions = []
+                    counts = {"giver_only": 0, "both": 0, "receiver_only": 0}
+                    recomputed = None
+                    for k in range(1, len(reader) + 1):
+                        world = reader.world_state(k)
+                        held = world[f"{task.object_name}/grasped_by"]
+                        giver, receiver = held[task.giver], held[task.receiver]
+                        counts["giver_only"] += int(giver and not receiver)
+                        counts["both"] += int(giver and receiver)
+                        counts["receiver_only"] += int(receiver and not giver)
+                        phase = task.phase
+                        status = task.update(
+                            world, reader.spec.collection.deployment.control_dt
+                        )
+                        if phase != task.phase:
+                            transitions.append({"step": k, "phase": task.phase})
+                        if status.outcome is not None:
+                            recomputed = {
+                                "step": k,
+                                "code": status.outcome.code,
+                                "reason": status.outcome.reason,
+                            }
+                            break
+                    final = reader.world_state(len(reader))
+                    position = final[f"{task.object_name}/pose_world"][:3]
+                    result["handover_metrics"] = {
+                        "phase_transitions": transitions,
+                        "grasp_samples": counts,
+                        "recomputed_outcome": recomputed,
+                        "final_grasped_by": final[
+                            f"{task.object_name}/grasped_by"
+                        ].tolist(),
+                        "independent_displacement_m": None
+                        if task.exchange_position is None
+                        else float(np.linalg.norm(position - task.exchange_position)),
+                        "final_giver_contact_force_n": float(
+                            np.linalg.norm(
+                                final[
+                                    f"{task.object_name}/finger_contact_forces_world"
+                                ][task.giver],
+                                axis=1,
+                            ).max()
+                        ),
+                    }
             if manifest["spec"]["collection"]["task"]["id"] in {
                 "push_object",
                 "push_into_region",

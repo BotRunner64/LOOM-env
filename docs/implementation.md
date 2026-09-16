@@ -20,12 +20,12 @@ python scripts/inspect_data.py config configs/collection/pick_place.yaml
 
 ```bash
 python scripts/prepare_assets.py scene \
-  --source-root /inspire/hdd/global_user/czxs253130598/projects/sim_projects
+  --source-root .cache/assets/source-links
 ```
 
-默认写入 `.cache/assets/scenes/`。源路径和内容哈希必须与 `assets/catalog.py` 对应。该命令不修改共享源资产；木桌通过 Isaac Lab 的标准 MeshConverter 转 USD，物体与篮子直接引用缓存中的源 USDZ。
+默认写入 `.cache/assets/scenes/`。源路径和内容哈希必须与 `assets/catalog.py` 对应。该命令不修改共享源资产；木桌通过 Isaac Lab 的标准 MeshConverter 转 USD，物体与篮子引用已包含物理属性的 LOOM USD 定义及其几何依赖。
 
-RoboDojo USDZ 直接引用，保留原始动态刚体、凸分解／SDF、材质和物理属性，准备流程检查引用前后的物理配置一致。场景中的篮子保持动态，其位姿、速度、接触、重置和重放与其他动态物体走同一条链。ManiSkill 桌子源文件只有 GLB 网格；桌板按实测尺寸建立静态长方体碰撞，桌腿及下方横梁保留原三角网格，以消除桌板三角网格与篮子 SDF 接触时的持续摆动。外观保持原样，转换与验证方式见[场景资产文档](scene-assets.md)。
+RoboDojo USDZ 保留原始外观、动态刚体与凸分解／SDF；物体质量和物理材质直接存于 LOOM USD 定义，准备与运行均不从外部属性表补值。场景中的篮子保持动态，其位姿、速度、接触、重置和重放与其他动态物体走同一条链。ManiSkill 桌子源文件只有 GLB 网格；桌板按实测尺寸建立静态长方体碰撞，桌腿及下方横梁保留原三角网格，以消除桌板三角网格与篮子 SDF 接触时的持续摆动。外观保持原样，转换与验证方式见[场景资产文档](scene-assets.md)。
 
 规划器读取源碰撞网格及实时世界位姿，不改动物理资产。cuRobo 源网格表示与 PhysX 烹饪后的凸分解／SDF 存在表示差异，任务执行验收仍是必要条件。
 每个缓存目录包含 `asset.usda`、`collision.npz`、源模型及材质依赖、`asset.json`。缓存清单记录定义指纹、准备版本、转换版本和各文件 SHA-256。加载时拒绝缺失、被修改或定义已变化的缓存；Episode 保存对应版本与来源信息。
@@ -101,11 +101,11 @@ python scripts/check_pick_place.py outputs/manipulation/episodes/place-demo \
 
 ### 准备与运行
 
-从仓库根目录运行，先激活完整 `loom-env` 环境，按本文“运行前”设置 GPU／Vulkan／EULA，并准备 Panda。模型来自本地共享 `sim_projects`，版本与哈希在资产目录固定；不需要另行下载。薄垫和标线的几何是仓库内小型 USDA，正式缓存仍统一写入 `.cache/assets/scenes/`。
+从仓库根目录运行，先激活完整 `loom-env` 环境，按本文“运行前”设置 GPU／Vulkan／EULA，并准备 Panda。模型使用已安装的 LOOM USD 资产，版本与哈希在资产目录固定；源布局见[资产指南](scene-assets.md)。薄垫和标线的几何是仓库内小型 USDA，正式缓存仍统一写入 `.cache/assets/scenes/`。
 
 ```bash
 python scripts/prepare_assets.py scene \
-  --source-root /inspire/hdd/global_user/czxs253130598/projects/sim_projects
+  --source-root .cache/assets/source-links
 python scripts/inspect_data.py config configs/collection/push_plate.yaml
 python scripts/check_scene_assets.py --collection configs/collection/push_plate.yaml \
   --output-dir outputs/plate-health
@@ -266,3 +266,62 @@ schema 1（RGB 在 HDF5 内）不由当前读取器兼容，已有文件不会�
 | 有轨迹但无法作为有效数据读取 | `inspect_data.py episode`；检查是否仍在 `.incomplete/` |
 
 采集完成应输出 `RESULT`，任务成功时 `outcome.code=success`；数据检查无错误，视频显示实际抓持和释放。物理或任务失败应保留原因与过程，不能只用规划成功或文件存在作为验收依据。
+
+## 单项替换的组合验收
+
+以下结果来自旧版物理资产，保留作历史证据；物理属性迁入 USD 后，任务效果需重新验收。
+
+2026-09-16 在本机 RTX 5090 上运行以下五个 seed 0 案例。任务比较固定同一场景／部署；场景比较固定同一任务／部署；本体比较固定同一任务／场景。保存的展开配置已逐项比较，五条轨迹的数据／视频完整性和离线任务判据复核均通过。
+
+| 回合 ID | 任务 | 场景 | 部署／操作臂 | 步数 |
+| --- | --- | --- | --- | --- |
+| `lift-panda-tabletop` | 抓起 | tabletop | Panda／右 | 114 |
+| `place-panda-tabletop` | 放入 | tabletop | Panda／右 | 205 |
+| `place-panda-compact` | 放入 | tabletop_compact | Panda／右 | 220 |
+| `place-ur-compact` | 放入 | tabletop_compact | UR5＋WSG／右 | 208 |
+| `place-panda-tabletop-left` | 放入 | tabletop | Panda／左 | 186 |
+
+这验证了代表性组合，不代表任意任务、布局与本体都兼容。UR5＋WSG 回合物理重放通过，目标物最大位置偏差约 3.48 mm、姿态偏差约 0.0721 rad，均在现有重放容差内。证据在 `outputs/composition-validation/summary.json`、`comparison.jpg`、`videos/` 和 `replay-ur/place-ur-compact-replay-comparison.json`。
+
+从仓库根目录激活完整 `loom-env` 环境，准备 Panda、UR5＋WSG、桌子、积木、篮子资产，并按本文“运行前”设置 GPU／EULA 后执行。重复运行须更换输出目录或回合 ID：
+
+```bash
+python scripts/collect.py --collection configs/collection/lift.yaml --seed 0 \
+  --episode-id lift-panda-tabletop --output-dir outputs/composition-validation
+python scripts/collect.py --seed 0 \
+  --episode-id place-panda-tabletop --output-dir outputs/composition-validation
+python scripts/collect.py --scene configs/scenes/tabletop_compact.yaml --seed 0 \
+  --episode-id place-panda-compact --output-dir outputs/composition-validation
+python scripts/collect.py --scene configs/scenes/tabletop_compact.yaml \
+  --deployment configs/deployments/dual_ur5_wsg.yaml --seed 0 \
+  --episode-id place-ur-compact --output-dir outputs/composition-validation
+python scripts/collect.py --arm left --seed 0 \
+  --episode-id place-panda-tabletop-left --output-dir outputs/composition-validation
+python scripts/inspect_data.py index outputs/composition-validation \
+  --output outputs/composition-validation/index.jsonl
+python scripts/replay_episode.py outputs/composition-validation/episodes/place-ur-compact \
+  --output-dir outputs/composition-validation/replay-ur
+```
+
+## 日常物体双臂交接
+
+当前为开发中的双 Panda 茶饮包装交接，尚未通过效果验收。早期 `tea-pack-forward-05` 与 `tea-pack-reverse-02` 的成功标签有误：释放后滑落仍有双指接触，下落位移被计入成功。旧视频仅作失败证据，不能用于成功数据采集。物理资产现已重新准备，旧版本的重放报告也不能证明新版本有效。
+
+终点为接收臂在空中独立抓稳。任务先确认递出臂单独持有和双方共同持有；再检查接收臂单独持有、递出臂无接触、向上移动至少 5 cm，并连续 1 秒保持线速度不超过 0.02 m/s、角速度不超过 0.1 rad/s。完整物体离桌至少 4 cm。此判据独立于专家阶段，实测接触本身不等于稳定抓持。抓持几何仍在验证。
+
+从仓库根目录，激活完整 `loom-env` 环境并完成 GPU/EULA 配置，准备 Panda、桌面和物体资产后运行：
+
+```bash
+python scripts/prepare_assets.py scene --source-root .cache/assets/source-links
+python scripts/check_scene_assets.py --collection configs/collection/handover.yaml \
+  --output-dir outputs/handover-health
+python scripts/collect.py --collection configs/collection/handover.yaml \
+  --output-dir outputs/handover --episode-id tea-demo --seed 0
+python scripts/inspect_data.py episode outputs/handover/episodes/tea-demo
+python scripts/replay_episode.py outputs/handover/episodes/tea-demo \
+  --output-dir outputs/handover-replay
+```
+
+准备来源与自包含物理定义见[资产指南](scene-assets.md)。已有本地源布局 `.cache/assets/source-links` 可作为 `--source-root`；`--scene-asset robodojo:tea_carton_pack` 只重建该物体，旧版桌面等依赖仍须重建。反向配置为 `configs/collection/handover_reverse.yaml`，同时交换两臂角色和物体朝向。两份场景固定布局，seed 不改变布局。
+
+采集自动输出轨迹目录、三路相机及 `outputs/handover/videos/<id>.mp4`。必须观察释放之后是否持续独立拿稳，并检查速度、离桌高度与重放结果；日志成功不能替代视频验收。资产健康检查通过只代表物理定义与静置有效，不代表交接成功。

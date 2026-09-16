@@ -41,6 +41,10 @@ def main():
     if args.scene:
         collection = replace(collection, scene=load_scene(args.scene))
     if args.arm:
+        if set(collection.arm_roles) != {"manipulator"}:
+            parser.error(
+                "--arm applies to single-manipulator tasks; bind giver/receiver in the collection"
+            )
         collection = replace(collection, arm_roles={"manipulator": args.arm})
     if args.max_steps is not None:
         collection = replace(collection, max_steps=args.max_steps)
@@ -105,7 +109,7 @@ def main():
         code = 1
     finally:
         if source is not None:
-            source.planner.planner.destroy()
+            source.close()
         if env is not None:
             env.close()
         launcher.app.close(exit_code=code)

@@ -199,9 +199,18 @@ def main():
     parser.add_argument("models", nargs="+", choices=[*MODELS, "all", "scene"])
     parser.add_argument("--asset-root", type=Path, default=ROOT / ".cache/assets")
     parser.add_argument(
-        "--source-root", type=Path, help="Shared sim_projects root for scene assets"
+        "--scene-asset",
+        action="append",
+        help="Prepare only this scene asset ID; repeat to select several",
+    )
+    parser.add_argument(
+        "--source-root",
+        type=Path,
+        help="Source layout containing LOOM RoboDojo USD definitions and ManiSkill geometry",
     )
     args = parser.parse_args()
+    if args.scene_asset and "scene" not in args.models:
+        parser.error("--scene-asset requires scene")
     root = args.asset_root.resolve()
     if root.is_relative_to(ROOT) and not root.is_relative_to(ROOT / ".cache/assets"):
         parser.error("Repository-local assets must be under the ignored .cache/assets/")
@@ -209,10 +218,12 @@ def main():
         parser.error("Set OMNI_KIT_ACCEPT_EULA=YES after accepting NVIDIA's EULA")
     if "scene" in args.models:
         if args.source_root is None:
-            parser.error("scene requires --source-root pointing to sim_projects")
+            parser.error(
+                "scene requires --source-root pointing to the prepared source layout"
+            )
         from loom_env.assets.prepare import prepare_scene_assets
 
-        prepare_scene_assets(root, args.source_root)
+        prepare_scene_assets(root, args.source_root, args.scene_asset)
     names = []
     for choice in args.models:
         if choice == "scene":

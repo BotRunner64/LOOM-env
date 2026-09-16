@@ -8,13 +8,23 @@
 def Xform "Region"
 {
     def Cube "Mat" (
-        prepend apiSchemas = ["PhysicsCollisionAPI"]
+        prepend apiSchemas = ["PhysicsCollisionAPI", "MaterialBindingAPI"]
     )
     {
+        rel material:binding:physics = </Region/LoomPhysics>
         color3f[] primvars:displayColor = [(0.08, 0.42, 0.25)]
         double size = 1
         float3 xformOp:scale = (0.22, 0.22, 0.001)
         double3 xformOp:translate = (0, 0, 0.5)
         uniform token[] xformOpOrder = ["xformOp:scale", "xformOp:translate"]
+    }
+
+    def Material "LoomPhysics" (
+        prepend apiSchemas = ["PhysicsMaterialAPI"]
+    )
+    {
+        float physics:dynamicFriction = 0.5
+        float physics:restitution = 0
+        float physics:staticFriction = 0.5
     }
 }

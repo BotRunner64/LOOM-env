@@ -38,6 +38,9 @@ class LiftExpert:
         self.support, _ = workspace(collection.scene)
         self.dt = collection.deployment.control_dt
 
+    def close(self):
+        self.planner.planner.destroy()
+
     def reset(self, episode_input):
         self.command = initial_command(self.collection.deployment)
         self.stage_index = self.step = self.stage_steps = self.path_index = (

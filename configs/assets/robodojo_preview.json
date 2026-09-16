@@ -1,38 +1,36 @@
 {
+  "handover": [
+    "Clutter/tissue/00001/object.usda"
+  ],
   "food": [
-    "Rigid/bread/00000/object.usdz",
-    "Rigid/bread/00001/object.usdz",
-    "Rigid/donut/00000/object.usdz",
-    "Rigid/kiwi/00000/object.usdz",
-    "Rigid/waffle/00000/object.usdz",
-    "Rigid/chocolate_bar/00000/object.usdz",
-    "Rigid/juice_carton/00000/object.usdz",
-    "Rigid/bottle/00005/object.usdz",
-    "Rigid/bottle/00041/object.usdz",
-    "Rigid/can/00000/object.usdz"
+    "Rigid/bread/00000/object.usda",
+    "Rigid/bread/00001/object.usda",
+    "Rigid/donut/00000/object.usda",
+    "Rigid/kiwi/00000/object.usda",
+    "Rigid/waffle/00000/object.usda",
+    "Rigid/chocolate_bar/00000/object.usda",
+    "Rigid/juice_carton/00000/object.usda",
+    "Rigid/bottle/00005/object.usda",
+    "Rigid/bottle/00041/object.usda",
+    "Rigid/can/00000/object.usda"
   ],
   "everyday": [
-    "Rigid/toy_car/00001/object.usdz",
-    "Rigid/toy_car/00004/object.usdz",
-    "Rigid/teddy_bear/00000/object.usdz",
-    "Rigid/wooden_toy/00002/object.usdz",
-    "Rigid/brick/00001/object.usdz",
-    "Rigid/alarm/00000/object.usdz",
-    "Rigid/camera/00002/object.usdz",
-    "Rigid/mouse/00004/object.usdz",
-    "Rigid/phone/00000/object.usdz",
-    "Rigid/pen/00000/object.usdz"
+    "Rigid/toy_car/00001/object.usda",
+    "Rigid/toy_car/00004/object.usda",
+    "Rigid/teddy_bear/00000/object.usda",
+    "Rigid/wooden_toy/00002/object.usda",
+    "Rigid/brick/00001/object.usda",
+    "Rigid/alarm/00000/object.usda",
+    "Rigid/mouse/00004/object.usda",
+    "Rigid/pen/00000/object.usda"
   ],
   "tools_containers": [
-    "Rigid/hammer/00005/object.usdz",
-    "Rigid/wrench/00000/object.usdz",
-    "Rigid/scissor/00000/object.usdz",
-    "Rigid/tape_measure/00000/object.usdz",
-    "Rigid/cup/00001/object.usdz",
-    "Rigid/bowl/00003/object.usdz",
-    "Rigid/box/00000/object.usdz",
-    "Geometry/basket/00003/object.usdz",
-    "Rigid/pen_holder/00000/object.usdz",
-    "Rigid/plate/00002/object.usdz"
+    "Rigid/wrench/00000/object.usda",
+    "Rigid/scissor/00000/object.usda",
+    "Rigid/cup/00001/object.usda",
+    "Rigid/bowl/00003/object.usda",
+    "Rigid/box/00000/object.usda",
+    "Geometry/basket/00003/object.usda",
+    "Rigid/plate/00002/object.usda"
   ]
 }

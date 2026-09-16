@@ -35,6 +35,9 @@ class PushExpert:
         self.task = create_task(collection)
         self.dt = collection.deployment.control_dt
 
+    def close(self):
+        self.planner.planner.destroy()
+
     def reset(self, episode_input):
         self.command = initial_command(self.collection.deployment)
         self.command[self.grip_slice] = self.arm.gripper.command_limits[0][0]

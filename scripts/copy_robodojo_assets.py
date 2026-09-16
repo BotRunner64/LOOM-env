@@ -1,24 +1,17 @@
 #!/usr/bin/env python3
-"""Copy the local RoboDojo tabletop model collection and retain source annotations."""
+"""Copy RoboDojo geometry and install the versioned LOOM USD definitions."""
 
 import argparse
-from concurrent.futures import ThreadPoolExecutor, as_completed
 import hashlib
 import importlib.metadata
 import json
-import math
-from pathlib import Path
 import shutil
-import subprocess
 import zipfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE = Path(
-    "/inspire/hdd/global_user/czxs253130598/projects/sim_projects/RoboDojo/Assets/Object/RoboDojo"
-)
-KINDS = ("Rigid", "Geometry", "Clutter")
-MAX_EXTENT_M = 0.5
-MAX_MASS_KG = 3.0
+SOURCE = Path("/home/jw/projects/sim_projects/RoboDojo/Assets/Object/RoboDojo")
 
 
 def digest(path):
@@ -27,70 +20,75 @@ def digest(path):
 
 
 def inventory(source):
+    from pxr import Sdf, Usd, UsdGeom, UsdPhysics
+
+    from loom_env.assets.prepare import physics_properties
+
     selected, excluded = [], []
-    for kind in KINDS:
-        for path in sorted((source / kind).glob("*/*/metadata.json")):
-            relative = str(path.parent.relative_to(source))
-            data = json.loads(path.read_text())
-            geometry, physics = data.get("geometry", {}), data.get("physics", {})
-            dims = (
-                geometry.get("aligned_bbox", {}).get("extents")
-                or geometry.get("bbox")
-                or physics.get("size")
-            )
-            mass = physics.get("mass")
-            reason = None
-            if not (path.parent / "object.usdz").is_file():
-                reason = "missing_usdz"
-            elif (
-                not isinstance(dims, list)
-                or len(dims) != 3
-                or any(
-                    not isinstance(d, (int, float)) or not math.isfinite(d) or d < 0
-                    for d in dims
-                )
-                or max(dims) <= 0
+    for definition in sorted(
+        (ROOT / "configs/assets/robodojo").glob("*/*/*/object.usda")
+    ):
+        relative = definition.parent.relative_to(ROOT / "configs/assets/robodojo")
+        raw = source / relative / "object.usdz"
+        row = {"path": str(relative), "usd": str(relative / "object.usda")}
+        if not raw.is_file():
+            excluded.append({**row, "reason": "missing_usdz"})
+            continue
+        layer = Sdf.Layer.CreateAnonymous()
+        layer.ImportFromString(definition.read_text())
+        if digest(raw) != layer.customLayerData["source_sha256"]:
+            raise ValueError(f"Source geometry checksum mismatch: {raw}")
+        layer.GetPrimAtPath("/Asset").referenceList.prependedItems = [
+            Sdf.Reference(str(raw.resolve()))
+        ]
+        stage = Usd.Stage.Open(layer)
+        bounds = (
+            UsdGeom.BBoxCache(Usd.TimeCode.Default(), ["default", "render", "proxy"])
+            .ComputeWorldBound(stage.GetDefaultPrim())
+            .ComputeAlignedRange()
+        )
+        dims = [
+            float(x) * UsdGeom.GetStageMetersPerUnit(stage) for x in bounds.GetSize()
+        ]
+        row["dimensions_m"] = dims
+        try:
+            root = stage.GetDefaultPrim()
+            bodies = [p for p in stage.Traverse() if p.HasAPI(UsdPhysics.RigidBodyAPI)]
+            if (
+                bodies != [root]
+                or not UsdPhysics.RigidBodyAPI(root).GetRigidBodyEnabledAttr().Get()
             ):
-                reason = "invalid_dimensions"
-            elif max(dims) > MAX_EXTENT_M:
-                reason = "oversize"
-            elif isinstance(mass, (int, float)) and (
-                not math.isfinite(mass) or mass <= 0 or mass > MAX_MASS_KG
-            ):
-                reason = "invalid_or_excessive_mass"
-            row = {
-                "path": relative,
-                "usd": relative + "/object.usdz",
-                "dimensions_m": dims,
-                "mass_kg": mass,
-            }
-            if reason:
-                excluded.append({**row, "reason": reason})
-            else:
-                selected.append(row)
+                raise ValueError("Object needs one enabled root rigid body")
+            properties = physics_properties(stage)
+            if "mass_kg" not in properties or not properties["materials"]:
+                raise ValueError("Object needs a root rigid body and collision")
+            row["physics_status"] = "ready"
+        except ValueError as error:
+            row.update(physics_status="pending", physics_issue=str(error))
+        selected.append(row)
     return selected, excluded
 
 
 def copy_model(source, target, row):
     src, dst = source / row["path"], target / row["path"]
+    dst.mkdir(parents=True, exist_ok=True)
     files = {}
-    for original in sorted(src.rglob("*")):
-        if not original.is_file():
-            continue
-        relative = original.relative_to(src)
-        destination = dst / relative
+    definition = ROOT / "configs/assets/robodojo" / row["path"] / "object.usda"
+    for original in (src / "object.usdz", definition):
+        destination = dst / original.name
         expected = digest(original)
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        if destination.exists():
-            if destination.is_symlink() or digest(destination) != expected:
-                raise ValueError(f"Existing file differs from source: {destination}")
-        else:
+        if destination.is_symlink():
+            raise ValueError(f"Refusing symlink destination: {destination}")
+        changed = destination.exists() and digest(destination) != expected
+        if changed and original != definition:
+            raise ValueError(f"Existing geometry differs from source: {destination}")
+        if not destination.exists() or changed:
             temporary = destination.with_name(destination.name + ".partial")
             shutil.copyfile(original, temporary)
             if digest(temporary) != expected:
                 raise ValueError(f"Copy checksum mismatch: {destination}")
             temporary.replace(destination)
-        files[str(relative)] = {"sha256": expected, "size": original.stat().st_size}
+        files[original.name] = {"sha256": expected, "size": original.stat().st_size}
     with zipfile.ZipFile(dst / "object.usdz") as package:
         bad = package.testzip()
         if bad:
@@ -115,9 +113,7 @@ def main():
         or source.is_relative_to(target)
     ):
         raise ValueError("Source and destination must be separate directories")
-    revision = subprocess.check_output(
-        ["git", "-C", str(source), "rev-parse", "HEAD"], text=True
-    ).strip()
+    revision = "a14409d7fae673c00499e01fd88b4457df6351b1"
     selected, excluded = inventory(source)
     if not selected:
         raise ValueError("No tabletop assets found")
@@ -127,11 +123,7 @@ def main():
         "revision": revision,
         "source_root": str(source),
         "status": "copying",
-        "selection": {
-            "kinds": KINDS,
-            "max_extent_m": MAX_EXTENT_M,
-            "max_mass_kg_when_authored": MAX_MASS_KG,
-        },
+        "selection": "configs/assets/robodojo USD definitions",
         "excluded": excluded,
         "assets": [],
         "failures": [],
@@ -197,7 +189,9 @@ def main():
         if (index + 1) % 25 == 0 or index + 1 == len(manifest["assets"]):
             save()
             print(f"CHECKED {index + 1}/{len(manifest['assets'])}", flush=True)
-    issues = sum(row["dependency_check"] != "passed" for row in manifest["assets"])
+    issues = len(excluded) + sum(
+        row["dependency_check"] != "passed" for row in manifest["assets"]
+    )
     manifest["status"] = (
         "copied_with_issues"
         if issues or manifest["failures"]

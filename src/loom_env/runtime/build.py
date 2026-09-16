@@ -1,5 +1,6 @@
 """Explicit assembly shared by collection, replay, and physical validation."""
 
+from loom_env.experts.handover import HandoverExpert
 from loom_env.experts.pick_place import LiftExpert, PickPlaceExpert
 from loom_env.experts.push import PushExpert
 from loom_env.tasks import create_task
@@ -9,6 +10,7 @@ EXPERTS = {
     "lift_object": LiftExpert,
     "push_object": PushExpert,
     "push_into_region": PushExpert,
+    "handover_object": HandoverExpert,
 }
 
 
@@ -27,15 +29,24 @@ def create_expert(collection, environment, asset_root):
         factory = EXPERTS[collection.task.id]
     except KeyError as error:
         raise ValueError(f"No expert for task: {collection.task.id}") from error
-    planner = ArmPlanner(
-        collection.deployment,
-        collection.scene,
-        collection.arm_roles["manipulator"],
-        collection.role_bindings["target_object"],
-        asset_root,
-    )
+    planners = {}
     try:
-        return factory(collection, planner, environment.world_state)
+        sides = (
+            (collection.arm_roles["giver"], collection.arm_roles["receiver"])
+            if factory is HandoverExpert
+            else (collection.arm_roles["manipulator"],)
+        )
+        for side in sides:
+            planners[side] = ArmPlanner(
+                collection.deployment,
+                collection.scene,
+                side,
+                collection.role_bindings["target_object"],
+                asset_root,
+            )
+        planning = planners if factory is HandoverExpert else planners[sides[0]]
+        return factory(collection, planning, environment.world_state)
     except BaseException:
-        planner.planner.destroy()
+        for planner in planners.values():
+            planner.planner.destroy()
         raise

@@ -209,7 +209,7 @@ def main():
                 "arm": side,
                 "result": plain(swapped_result),
             }
-            expert.planner.planner.destroy()
+            expert.close()
             report["passed"] = all(case["passed"] for case in report.values())
             code = 0 if report["passed"] else 1
             env.close()

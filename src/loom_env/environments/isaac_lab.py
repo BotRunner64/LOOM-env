@@ -33,6 +33,7 @@ from loom_env.embodiments.manipulation import manipulation_profile
 from loom_env.embodiments.isaac_lab import DualArmArticulation, articulation_config
 from loom_env.assets.catalog import (
     asset_definition,
+    collision_mesh,
     load_prepared,
     prepared_directory,
     sha256,
@@ -45,7 +46,6 @@ from loom_env.scenes.workspace import (
     dynamic_names,
     transform,
     workspace,
-    corners,
 )
 from loom_env.specs.config import ARMS, EpisodeSpec, plain
 from loom_env.specs.episode import Frame, Observation, Transition, observation_shapes
@@ -420,6 +420,14 @@ class ManipulationEnvironment(ManagerBasedEnv):
                 root_velocity=torch.zeros((1, 6), device=self.device)
             )
         support, _ = workspace(self.collection.scene)
+        # A rotated bounding box has corners outside an irregular object's mesh.
+        # Use authored collision vertices when checking actual support height.
+        support_vertices = {
+            name: collision_mesh(
+                self.asset_root, self.collection.scene.objects[name]["asset"]
+            )[0]
+            for name in self.object_names
+        }
         ready_steps = 0
         for _ in range(round(5.0 / self.step_dt)):
             frame = self.step(command).frame
@@ -437,11 +445,8 @@ class ManipulationEnvironment(ManagerBasedEnv):
             support_errors = {}
             for name in self.object_names:
                 measured = frame.world_state[f"{name}/pose_world"]
-                asset = asset_definition(self.collection.scene.objects[name]["asset"])
-                bottom = (
-                    Rotation.from_quat(measured[3:]).apply(corners(asset))
-                    + measured[:3]
-                )[:, 2].min()
+                vertical = Rotation.from_quat(measured[3:]).as_matrix()[2]
+                bottom = (support_vertices[name] @ vertical).min() + measured[2]
                 support_errors[name] = {
                     "xy_m": float(np.linalg.norm(measured[:2] - candidates[name][:2])),
                     "height_m": float(abs(bottom - support[2])),

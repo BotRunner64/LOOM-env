@@ -104,9 +104,7 @@ def test_collection_continues_after_video_failure(
         ),
         close=lambda: None,
     )
-    source = SimpleNamespace(
-        planner=SimpleNamespace(planner=SimpleNamespace(destroy=lambda: None))
-    )
+    source = SimpleNamespace(close=lambda: None)
     monkeypatch.setattr(build, "create_environment", lambda *args: env)
     monkeypatch.setattr(build, "create_expert", lambda *args: source)
 
