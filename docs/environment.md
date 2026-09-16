@@ -52,9 +52,10 @@ python scripts/check_env.py --curobo
 
 检查项目依赖范围、`pip check`、数据读写、CUDA 矩阵运算、cuRobo 正向运动学及梯度，以及小网格的远处无碰撞和近处碰撞。结果写入 `.cache/checks/report.json`，子进程日志在同目录。版本检查通过不能替代仿真和实际任务验收。
 
-首次启动若出现 [NVIDIA Omniverse EULA](https://docs.omniverse.nvidia.com/platform/latest/common/NVIDIA_Omniverse_License_Agreement.html) 提示，阅读并按提示确认：
+仿真检查脚本不会交互询问 EULA；启动前会检查 `OMNI_KIT_ACCEPT_EULA`，未设置接受标记时直接退出，并将原因写入 `simulation.log`。阅读 [NVIDIA Omniverse EULA](https://docs.omniverse.nvidia.com/platform/latest/common/NVIDIA_Omniverse_License_Agreement.html) 并同意后，在当前终端执行：
 
 ```bash
+export OMNI_KIT_ACCEPT_EULA=YES
 python scripts/check_env.py --sim
 ```
 
