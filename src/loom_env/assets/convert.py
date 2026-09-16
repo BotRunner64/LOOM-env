@@ -4,6 +4,25 @@ import argparse
 from pathlib import Path
 
 
+def relativize_local_assets(usd_path):
+    """Keep converted mesh dependencies portable with their output directory."""
+    from pxr import Sdf, UsdUtils
+
+    usd_path = Path(usd_path).resolve()
+    layer = Sdf.Layer.FindOrOpen(str(usd_path))
+
+    def relative_path(value):
+        path = Path(value)
+        if path.is_absolute() and path.is_relative_to(usd_path.parent):
+            if not path.is_file():
+                raise FileNotFoundError(path)
+            return path.relative_to(usd_path.parent).as_posix()
+        return value
+
+    UsdUtils.ModifyAssetPaths(layer, relative_path)
+    layer.Save()
+
+
 def main():
     from isaaclab.app import AppLauncher
 
@@ -66,6 +85,8 @@ def main():
                     mesh_collision_props=schemas_cfg.TriangleMeshPropertiesCfg(),
                 )
             )
+        if args.kind == "mesh":
+            relativize_local_assets(converter.usd_path)
         print(f"ASSET_CONVERTED {converter.usd_path}", flush=True)
     finally:
         app.close()

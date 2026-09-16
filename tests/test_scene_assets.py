@@ -1,4 +1,5 @@
 import json
+import shutil
 
 import pytest
 
@@ -9,6 +10,38 @@ from loom_env.assets.catalog import (
     prepared_directory,
     sha256,
 )
+
+
+def test_converted_texture_resolves_after_moving_directory(tmp_path):
+    pytest.importorskip("pxr")
+    from pxr import Sdf, Usd
+
+    from loom_env.assets.convert import relativize_local_assets
+
+    original = tmp_path / "original"
+    original.mkdir()
+    texture = original / "textures" / "color.png"
+    texture.parent.mkdir()
+    texture.write_bytes(b"texture-content")
+    usd = original / "mesh.usda"
+    stage = Usd.Stage.CreateNew(str(usd))
+    prim = stage.DefinePrim("/Material")
+    prim.CreateAttribute("texture", Sdf.ValueTypeNames.Asset).Set(
+        Sdf.AssetPath(str(texture))
+    )
+    prim.CreateAttribute("module", Sdf.ValueTypeNames.Asset).Set(
+        Sdf.AssetPath("gltf/pbr.mdl")
+    )
+    stage.GetRootLayer().Save()
+    relativize_local_assets(usd)
+    moved = tmp_path / "moved"
+    shutil.move(original, moved)
+    relocated = Usd.Stage.Open(str(moved / "mesh.usda"))
+    material = relocated.GetPrimAtPath("/Material")
+    value = material.GetAttribute("texture").Get()
+    assert value.path == "textures/color.png"
+    assert value.resolvedPath == str(moved / "textures/color.png")
+    assert material.GetAttribute("module").Get().path == "gltf/pbr.mdl"
 
 
 def prepared_fixture(root):
@@ -58,8 +91,9 @@ def test_unusable_prepared_assets_are_rejected(tmp_path, change):
 def test_usdz_reference_preserves_authored_physics(tmp_path, monkeypatch):
     pytest.importorskip("pxr.Usd")
     from pxr import Sdf, Usd, UsdGeom, UsdPhysics, UsdUtils
+
     from loom_env.assets import prepare
-    from loom_env.assets.catalog import AssetDefinition, ASSETS
+    from loom_env.assets.catalog import ASSETS, AssetDefinition
 
     source = tmp_path / "fixture.usda"
     stage = Usd.Stage.CreateNew(str(source))
@@ -115,6 +149,7 @@ def test_usdz_reference_preserves_authored_physics(tmp_path, monkeypatch):
 def test_tabletop_replacement_preserves_lower_geometry():
     import numpy as np
     import trimesh
+
     from loom_env.assets.prepare import table_collision_parts
 
     top = trimesh.creation.box(extents=(1, 2, 0.04))
@@ -138,6 +173,7 @@ def test_region_preparation_matches_physics_and_planner_geometry(
     pytest.importorskip("pxr.Usd")
     import numpy as np
     from pxr import Usd, UsdPhysics
+
     from loom_env.assets import prepare
     from loom_env.assets.catalog import collision_mesh
 
