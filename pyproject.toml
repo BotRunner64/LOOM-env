@@ -16,12 +16,8 @@ dependencies = [
     "Pillow",
     "imageio",
     "imageio-ffmpeg",
-]
-
-[project.optional-dependencies]
-# NVIDIA publishes the Sim-compatible Lab wheel; see docs/environment.md.
-sim = [
     "torch",
+    # NVIDIA publishes the Sim-compatible Lab wheel; see docs/environment.md.
     "isaacsim[all,extscache]>=6",
     "isaaclab[isaacsim]>=3.0.0b2",
     "warp-lang",
@@ -30,7 +26,7 @@ sim = [
     "nvidia-curobo[cu12] @ git+https://github.com/NVlabs/curobo.git@78fd485fa82d9b9a063fb4985e371814587e666a",
 ]
 
-[dependency-groups]
+[project.optional-dependencies]
 dev = ["pytest", "ruff"]
 
 [tool.setuptools.packages.find]

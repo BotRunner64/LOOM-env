@@ -165,13 +165,12 @@ def main():
     declarations = [
         f"{project['name']}=={project['version']}",
         *project["dependencies"],
-        *project["optional-dependencies"]["sim"],
     ]
     requirements = [Requirement(value) for value in declarations]
     requirements = [
         requirement
         for requirement in requirements
-        if requirement.marker is None or requirement.marker.evaluate({"extra": "sim"})
+        if requirement.marker is None or requirement.marker.evaluate({"extra": ""})
     ]
     for requirement in requirements:
         try:

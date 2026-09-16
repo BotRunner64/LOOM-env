@@ -6,40 +6,37 @@
 
 ## 创建环境
 
-从仓库根目录执行。Conda 只提供 Python，依赖使用 pip 安装：
+从仓库根目录执行。Conda 提供 Python 环境，项目依赖使用 `uv pip` 安装：
 
 ```bash
-conda create -n loom-env python=3.12 'pip>=25.1'
+conda create -n loom-env python=3.12 pip
 conda activate loom-env
+python -m pip install uv
 ```
 
 已有同名环境时先检查安装来源，避免源码 editable 子包覆盖官方 wheel 的模块。
 
 ## 安装依赖
 
-### 基础开发
-
-数据处理、配置和非仿真模块开发只需：
+仿真依赖默认安装；开发环境额外安装 pytest 和 Ruff：
 
 ```bash
-pip install -e . --group dev
-```
-
-`-e .` 使源码修改直接生效；`--group dev` 安装 pytest 和 Ruff，不需要开发工具时可省略。此命令不安装仿真依赖。
-
-### 完整仿真
-
-```bash
-pip install -e '.[sim]' --group dev \
-    --index-url https://pypi.org/simple \
+uv pip install -e '.[dev]' \
     --extra-index-url https://pypi.nvidia.com \
-    --extra-index-url https://download.pytorch.org/whl/cu128
+    --extra-index-url https://download.pytorch.org/whl/cu128 \
+    --index-strategy unsafe-best-match
 pip check
 ```
 
+`-e` 使源码修改直接生效；`[dev]` 安装开发工具，只运行仿真时改为 `uv pip install -e .`，保留两个下载源参数和 `--index-strategy unsafe-best-match`。开发工具通过 `project.optional-dependencies.dev` 声明。安装时确认 uv 输出的目标环境为已激活的 `loom-env`。
+
+uv 默认只从首个包含某包的源选择版本；PyTorch 源也包含 `idna`、`jinja2` 等普通依赖，但可能没有 Isaac Sim 要求的版本。`unsafe-best-match` 允许综合所有源的候选版本，避免这些包遮挡 PyPI 上的所需版本。该策略以信任列出的下载源为前提，行为接近 pip，见 [uv 多源解析说明](https://docs.astral.sh/uv/pip/compatibility/#packages-that-exist-on-multiple-indexes)。
+
+上述命令使用默认 PyPI 和两个额外源。uv 不读取 `pip.conf`；若本机的 uv 配置更改了默认源且缺包，可追加 `--index-url https://pypi.org/simple`。
+
 [NVIDIA 源](https://pypi.nvidia.com/isaaclab/)提供官方 Isaac Lab 统一 wheel，已包含资产、PhysX、Omniverse 和可视化模块，无需克隆 Lab、安装五个源码子包或修改第三方源码。`isaaclab[isaacsim]>=3.0.0b2` 允许所需 API 系列的 Beta wheel，并由其 `isaacsim` extra 选择配套 Sim；项目额外表达的 Sim 要求只有 `>=6`。这不保证任意 Lab 与任意 Sim 都能混用。
 
-PyTorch 下载源选择当前 Linux x86_64 仿真组合使用的 CUDA 12.8 构建；Torch 的具体版本由上游决定。若以后切换上游组合，应按其平台要求调整下载源，而不是在项目中再维护一套版本表。
+PyTorch 下载源提供 CUDA 12.8 构建，但添加该源并不强制安装此构建；实际版本由依赖解析决定。安装后按下文检查 `torch.version.cuda`，并运行 CUDA 与仿真检查。
 
 cuRobo 从 `pyproject.toml` 指定的上游提交安装。保留这一源码提交是因为已发布的 v0.8.0 缺少小网格碰撞查询修复；该提交包含上游修复，不再应用本地补丁。后续有包含修复的正式发行版时可切换到发行包。
 
@@ -78,6 +75,8 @@ export VK_ICD_FILENAMES=/etc/vulkan/icd.d/nvidia_icd.json
 该路径属于宿主机配置，不是所有机器的通用要求。`nvidia-smi` 顶部的 CUDA 版本是驱动支持上限；实际 PyTorch CUDA 构建可用 `python -c 'import torch; print(torch.version.cuda)'` 查看。
 
 - 安装找不到 Lab Beta wheel：检查 NVIDIA 下载源是否可访问；仅使用 PyPI 可能得到旧版 Lab。
+- uv 报 `idna`／`jinja2` 无匹配版本，且提示包在首个源中找到：确认安装命令包含 `--index-strategy unsafe-best-match`。
+- 下载超时或 Git TLS 连接中断：重跑安装命令可复用已完成的缓存；若反复失败，检查网络／代理到报错下载地址的连接。`Resolved ... packages` 只表示依赖解析完成，仍需等待下载和安装结束。
 - 依赖冲突：先运行 `pip check`，检查是否混入旧 editable 子包；不要用 `--no-deps` 或修改第三方源码绕过正式安装的依赖解析。
 - cuRobo 小网格检查失败：核对是否安装了项目声明的上游提交，不能仅看 `0.8.0` 版本前缀。
 - 仿真启动失败：查看 `simulation.log`，检查 GPU、Vulkan ICD 和 EULA 设置；首次 RTX 着色器编译可能较慢。
