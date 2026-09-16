@@ -12,14 +12,15 @@ def test_world_updates_move_obstacles_and_restore_target_collision():
         pytest.skip("cuRobo scene queries require CUDA")
     trimesh = pytest.importorskip("trimesh")
     import numpy as np
-    from scipy.spatial.transform import Rotation
-    from curobo.scene import Mesh
     from curobo._src.geom.collision.buffer_collision import CollisionBuffer
     from curobo._src.geom.collision.collision_scene import (
         SceneCollision,
         SceneCollisionCfg,
     )
     from curobo._src.types.device_cfg import DeviceCfg
+    from curobo.scene import Mesh
+    from scipy.spatial.transform import Rotation
+
     from loom_env.experts.curobo import ArmPlanner
 
     device = DeviceCfg()
@@ -75,9 +76,14 @@ def test_world_updates_move_obstacles_and_restore_target_collision():
     )
     buffer = CollisionBuffer.from_shape(query.shape, device)
 
-    def check(allow, expected, count):
+    def check(allow, expected, count, contact_objects=()):
         assert (
-            planner.update_world(observation, truth, allow_object_contact=allow)
+            planner.update_world(
+                observation,
+                truth,
+                allow_object_contact=allow,
+                contact_objects=contact_objects,
+            )
             == count
         )
         cost = checker.get_sphere_distance(
@@ -98,8 +104,16 @@ def test_world_updates_move_obstacles_and_restore_target_collision():
     check(False, [True, False, True, False, False], 2)
     planner.attached = False
     check(False, [True, False, True, False, True], 3)
+    # A carried tool and a second contact object have independent masks.
+    planner.attached = True
+    check(False, [True, False, False, False, False], 1, ("table",))
+    check(False, [True, False, True, False, False], 2)
+    with pytest.raises(ValueError, match="planning obstacle"):
+        planner.update_world(
+            observation, truth, allow_object_contact=False, contact_objects=("unknown",)
+        )
     assert len(loads) == 1
-    assert len(resets) == 5
+    assert len(resets) == 8
 
 
 def test_contact_step_uses_native_state_and_rejects_obstacles(monkeypatch):
@@ -109,8 +123,10 @@ def test_contact_step_uses_native_state_and_rejects_obstacles(monkeypatch):
     if not torch.cuda.is_available():
         pytest.skip("Contact motion checks require CUDA")
     trimesh = pytest.importorskip("trimesh")
-    import numpy as np
     from pathlib import Path
+
+    import numpy as np
+
     from loom_env.experts import curobo
     from loom_env.runtime.runner import SourceFailure
     from loom_env.scenes.workspace import sample_objects, transform

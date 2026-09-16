@@ -1,0 +1,15 @@
+id: sweep_into_region
+instruction: 抓起{tool}，将{target_object}扫入{target_region}，再抬起工具。
+roles:
+  tool: graspable_object
+  target_object: graspable_object
+  target_region: target_region
+required_capabilities: [grasp, push]
+parameters:
+  hold_time: 0.25
+  failure_drop: 0.05
+  position_tolerance: 0.01
+  max_clearance: 0.005
+  contact_force: 0.02
+  max_tilt: 0.2617993877991494
+  tool_clearance: 0.04

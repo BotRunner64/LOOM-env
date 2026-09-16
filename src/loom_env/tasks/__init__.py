@@ -1,10 +1,11 @@
 """Explicit task factories; no simulator or expert dependency."""
 
+from .handover import HandoverTask
 from .lift import LiftTask
 from .place import PlaceTask
 from .push import PushTask
 from .push_region import PushIntoRegionTask
-from .handover import HandoverTask
+from .sweep import SweepTask
 
 TASKS = {
     "put_object_in_container": PlaceTask,
@@ -12,6 +13,7 @@ TASKS = {
     "push_object": PushTask,
     "push_into_region": PushIntoRegionTask,
     "handover_object": HandoverTask,
+    "sweep_into_region": SweepTask,
 }
 
 

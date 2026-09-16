@@ -37,6 +37,47 @@ class AssetDefinition:
 
 TABLE_SCALE = 0.75 / 0.5255104303359985
 ASSETS = {
+    "robodojo:mouse": AssetDefinition(
+        "mouse",
+        "https://huggingface.co/datasets/RoboDojo-Benchmark/RoboDojo",
+        "a14409d7fae673c00499e01fd88b4457df6351b1",
+        "RoboDojo/Assets/Object/RoboDojo/Rigid/mouse/00004/object.usda",
+        "31ab47e939a8635040d13f7a9ac717513217b702720fb19ce8c82a4f3a5929a4",
+        "graspable_object",
+        (
+            (-0.05592731758952141, -0.03663831204175949, -0.01828800141811371),
+            (0.0557999312877655, 0.036758989095687866, 0.01828800141811371),
+        ),
+        dynamic=True,
+    ),
+    "robodojo:waffle": AssetDefinition(
+        "waffle",
+        "https://huggingface.co/datasets/RoboDojo-Benchmark/RoboDojo",
+        "a14409d7fae673c00499e01fd88b4457df6351b1",
+        "RoboDojo/Assets/Object/RoboDojo/Rigid/waffle/00000/object.usda",
+        "c926fa8091abe08c28cad58efe91178c238b2fbced3fc62077751ce9b0492941",
+        "graspable_object",
+        (
+            (-0.0480516143143177, -0.045785870403051376, -0.016198664903640747),
+            (0.047948386520147324, 0.04587074741721153, 0.016163211315870285),
+        ),
+        dynamic=True,
+    ),
+    "robodojo:hand_brush": AssetDefinition(
+        "hand_brush",
+        "https://huggingface.co/datasets/RoboDojo-Benchmark/RoboDojo",
+        "a14409d7fae673c00499e01fd88b4457df6351b1",
+        "RoboDojo/Assets/Object/RoboDojo/Rigid/broom/00000/object.usda",
+        "b2227981ab1d49540a850e0019af20b7401e840262932d3611597f39ea845761",
+        "graspable_object",
+        (
+            (-0.018742237240076065, -0.041392821818590164, -0.12513768672943115),
+            (0.018657764419913292, 0.041407182812690735, 0.12486229836940765),
+        ),
+        dynamic=True,
+        # Handle section at local Z=-7.5 cm: approximately 22 mm across X.
+        grasp=(0.0, 0.021, -0.075),
+    ),
     "robodojo:juice_carton": AssetDefinition(
         "juice_carton",
         "https://huggingface.co/datasets/RoboDojo-Benchmark/RoboDojo",

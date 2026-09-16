@@ -5,16 +5,18 @@ from scipy.spatial.transform import Rotation
 
 from loom_env.assets.catalog import asset_definition
 from loom_env.scenes.workspace import transform
+
 from .push import PushTask
 
 
 class PushIntoRegionTask(PushTask):
+    roles = frozenset({"target_object", "target_region"})
     thresholds = (*PushTask.thresholds, "max_tilt")
     goal_parameters = ()
 
     def configure_goal(self, collection):
-        if set(collection.role_bindings) != {"target_object", "target_region"}:
-            raise ValueError("Region push requires target_object and target_region")
+        if set(collection.role_bindings) != self.roles:
+            raise ValueError(f"Region task requires roles {sorted(self.roles)}")
         self.region_name = collection.role_bindings["target_region"]
         obj = collection.scene.objects[self.region_name]
         region = asset_definition(obj["asset"])

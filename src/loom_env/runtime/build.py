@@ -3,6 +3,7 @@
 from loom_env.experts.handover import HandoverExpert
 from loom_env.experts.pick_place import LiftExpert, PickPlaceExpert
 from loom_env.experts.push import PushExpert
+from loom_env.experts.sweep import SweepExpert
 from loom_env.tasks import create_task
 
 EXPERTS = {
@@ -11,6 +12,7 @@ EXPERTS = {
     "push_object": PushExpert,
     "push_into_region": PushExpert,
     "handover_object": HandoverExpert,
+    "sweep_into_region": SweepExpert,
 }
 
 
@@ -41,7 +43,9 @@ def create_expert(collection, environment, asset_root):
                 collection.deployment,
                 collection.scene,
                 side,
-                collection.role_bindings["target_object"],
+                collection.role_bindings[
+                    "tool" if factory is SweepExpert else "target_object"
+                ],
                 asset_root,
             )
         planning = planners if factory is HandoverExpert else planners[sides[0]]

@@ -7,12 +7,9 @@ step hooks; EpisodeWriter remains the only on-disk recording implementation.
 import importlib.metadata
 from pathlib import Path
 
-import numpy as np
-from scipy.spatial.transform import Rotation
-import torch
-from pxr import Usd, UsdPhysics
-
 import isaaclab.sim as sim_utils
+import numpy as np
+import torch
 from isaaclab.assets import AssetBaseCfg
 from isaaclab.envs import ManagerBasedEnv, ManagerBasedEnvCfg
 from isaaclab.managers import (
@@ -23,14 +20,13 @@ from isaaclab.managers import (
     RecorderTerm,
     RecorderTermCfg,
 )
-from isaaclab.managers.recorder_manager import RecorderManagerBaseCfg, DatasetExportMode
+from isaaclab.managers.recorder_manager import DatasetExportMode, RecorderManagerBaseCfg
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.utils import configclass
 from isaaclab_physx.sensors import ContactSensorCfg
+from pxr import Usd, UsdPhysics
+from scipy.spatial.transform import Rotation
 
-from loom_env.embodiments.cameras import CameraMounts, camera_config
-from loom_env.embodiments.manipulation import manipulation_profile
-from loom_env.embodiments.isaac_lab import DualArmArticulation, articulation_config
 from loom_env.assets.catalog import (
     asset_definition,
     collision_mesh,
@@ -38,12 +34,15 @@ from loom_env.assets.catalog import (
     prepared_directory,
     sha256,
 )
+from loom_env.embodiments.cameras import CameraMounts, camera_config
 from loom_env.embodiments.commands import gripper_command, initial_command
 from loom_env.embodiments.contacts import opposing_contacts
+from loom_env.embodiments.isaac_lab import DualArmArticulation, articulation_config
+from loom_env.embodiments.manipulation import manipulation_profile
 from loom_env.scenes.isaac_lab import instance_config, simulation_config
 from loom_env.scenes.workspace import (
-    sample_objects,
     dynamic_names,
+    sample_objects,
     transform,
     workspace,
 )
@@ -195,15 +194,28 @@ def environment_config(collection, asset_root):
                 ),
             )
     for name, candidate in candidates.items():
+        obj_cfg = instance_config(
+            collection.scene.objects[name],
+            f"{prefix}/object_{name}",
+            candidate,
+            asset_root,
+        )
+        others = [n for n in dynamic_names(collection.scene) if n != name]
+        if not collection.scene.objects[name]["static"] and others:
+            obj_cfg.spawn.activate_contact_sensors = True
+            setattr(
+                scene,
+                f"object_contact_{name}",
+                ContactSensorCfg(
+                    prim_path=f"{prefix}/object_{name}",
+                    filter_prim_paths_expr=[f"{prefix}/object_{n}" for n in others],
+                    max_contact_data_count_per_prim=64,
+                ),
+            )
         setattr(
             scene,
             f"object_{name}",
-            instance_config(
-                collection.scene.objects[name],
-                f"{prefix}/object_{name}",
-                candidate,
-                asset_root,
-            ),
+            obj_cfg,
         )
     scene.light = AssetBaseCfg(
         prim_path="/World/Light", spawn=sim_utils.DomeLightCfg(intensity=600)
@@ -332,6 +344,16 @@ class ManipulationEnvironment(ManagerBasedEnv):
                     f"{name}/finger_contact_forces_world": np.asarray(contacts),
                 }
             )
+            others = [n for n in self.object_names if n != name]
+            if others:
+                forces = (
+                    self.scene[f"object_contact_{name}"]
+                    .data.force_matrix_w.torch[0, 0]
+                    .cpu()
+                    .numpy()
+                )
+                for other, force in zip(others, forces):
+                    world[f"{name}/object_contact_forces_world/{other}"] = force.copy()
         for name, obj in self.collection.scene.objects.items():
             if obj["static"]:
                 world[f"{name}/pose_world"] = self.instance_poses[name].copy()

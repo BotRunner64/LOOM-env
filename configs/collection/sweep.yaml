@@ -1,0 +1,10 @@
+task: ../tasks/sweep_into_region.yaml
+deployment: ../deployments/dual_panda.yaml
+scene: ../scenes/tabletop_brush_sweep.yaml
+role_bindings:
+  tool: brush
+  target_object: brick
+  target_region: storage
+arm_roles:
+  manipulator: right
+max_steps: 900

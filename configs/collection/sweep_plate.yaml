@@ -1,0 +1,10 @@
+task: ../tasks/sweep_into_region.yaml
+deployment: ../deployments/dual_panda.yaml
+scene: ../scenes/tabletop_brush_sweep_plate.yaml
+role_bindings:
+  tool: brush
+  target_object: plate
+  target_region: storage
+arm_roles:
+  manipulator: right
+max_steps: 900

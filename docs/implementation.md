@@ -389,3 +389,126 @@ done
 重放测量写入 `replay/<id>-replay-comparison.json`；应检查其中 `passed`、`outcome_matches` 和误差，而不仅检查重放视频是否生成。转向案例本轮仅采集和离线复核，未执行物理重放。
 
 本轮两项物理重放均 `passed: true`、`outcome_matches: true`，重放三路视频完整性检查通过。果汁盒最大位置／姿态偏差为 0.180 mm／0.00230 rad，平移茶饮包装为 0.816 mm／0.01587 rad；均在现有容差内。重放分别复现原超时与成功结果，不能将“重放通过”理解为原交接任务均成功。
+
+## 持工具扫物体入区域
+
+`SweepExpert` 使用 Panda 单臂从桌面抓起手持刷，将一个物体沿直线扫入可见收纳标线，随后抬起刷子。组合入口为 `configs/collection/sweep.yaml`；任务、专家分别在 `src/loom_env/tasks/sweep.py`、`src/loom_env/experts/sweep.py`。使用已检查的刚体手持刷；目标已拓展到积木、浅盘、鼠标和华夫饼。仍不覆盖软刷毛、多物体扫动或绕障。
+
+### 工具与执行
+
+工具 `robodojo:hand_brush` 来自源 `Rigid/broom/00000`，实际是约 25 cm 长的手持刷。USD 保留源外观和碰撞，质量 0.04 kg、静／动摩擦 0.45；不模拟刷毛形变，不修改这些物理值。柄部在局部 Z = −7.5 cm 处宽约 22 mm，抓点存于资产目录；源局部 +Y 向上、+Z 指向刷头时可平放。
+
+专家依次执行接近、下降、闭合、抬升、转移、降低、扫动和抬起。收尾抬升按实测刷子最低点计算高度，以任务离桌门槛再加 4 cm 为目标；路径结束后若仍低于门槛加 2 cm，最多补偿两次，仍不足则明确失败。任务判据始终独立检查整把工具，不以 TCP 抬高代替工具离桌。抬升后从实测工具与 TCP 位姿计算相对变换，按刷头位置规划接触路径。直线参考速度为 0.06 m/s。刷毛最低点的目标高度为桌上 14 mm，与 24 mm 积木形成约 10 mm 高度重叠；这验证刚体工具接触，不要求刷毛擦过桌面。目标不再按资产 ID 限制：重置时以实测位姿变换包围盒，要求物体最高点至少高于刷毛路径 5 mm（相对桌面至少 19 mm）。这是必要几何条件，不能证明曲面、空腔或薄边一定能有效接触；换物体仍需物理验收。当前物体拓展保留 14 mm 接触高度，未自动调整高度或物理参数。
+
+规划器将刷子作为携带物体，工具始终是自由刚体，仿真中不加固定约束或瞬移。近桌运动使用最大 25 mm 网格单元的包围盒覆盖球，每球覆盖对应单元的角点；相较八个大球，减少细长刷子包络在桌面附近的多余外扩。模型提供 128 个携带物体球槽，刷子实际使用 80 个；默认抓放仍使用原八球几何。扫动与撤离时显式允许目标积木接触，其余场景和机器人碰撞检查继续生效。
+
+### 判据与记录
+
+任务判定独立于专家阶段：
+
+- 刷子曾被操作臂握住并抬离桌面至少 4 cm，随后记录到刷子—积木接触力大于 0.02 N。
+- 全程积木不得被夹持或由夹爪直接接触，最低点离桌偏差不得超过 5 mm，倾角不得超过 15°。
+- 曾握住的刷子若连续 0.25 s 失去抓持，判定失败。
+- 最终积木包围盒完整落在目标区域内，刷子仍握在手中、离桌至少 4 cm 且不再接触积木，连续满足 0.25 s。成功不以低速度为门槛。
+
+环境对每个动态物体记录与其他动态物体的接触力，字段为 `<name>/object_contact_forces_world/<other>`，不依赖任务角色。接触传感器只用于测量，物理属性仍从 USD 读取。`inspect_data.py episode` 输出 `sweep_metrics`：工具／夹爪接触采样、积木离桌与倾角、区域余量、最终工具状态，并从记录重新运行任务判定。
+
+### 运行与检查
+
+工作目录为仓库根目录，激活完整 `loom-env` 环境，按[环境说明](environment.md)设置 EULA 和本机 GPU/Vulkan。前置资产为 Panda、木桌、积木、收纳标线和新增手持刷；已有本地完整 RoboDojo 库时执行：
+
+```bash
+python scripts/prepare_assets.py scene --source-root .cache/assets/source-links
+python scripts/check_scene_assets.py --collection configs/collection/sweep.yaml \
+  --output-dir outputs/sweep/health
+python scripts/collect.py --collection configs/collection/sweep.yaml \
+  --output-dir outputs/sweep --episode-id brush-01 --seed 0
+python scripts/inspect_data.py episode outputs/sweep/episodes/brush-01 \
+  > outputs/sweep/brush-01-report.json
+python scripts/replay_episode.py outputs/sweep/episodes/brush-01 \
+  --output-dir outputs/sweep/replay
+```
+
+健康检查预期 `passed: true`、刷子实际质量约 0.04 kg；采集预期任务 `success` 且 `video_error: null`。检查 `outputs/sweep/videos/brush-01.mp4` 中的抓柄、刷头扫动、积木入区与工具抬起；三路原视频在 `episodes/brush-01/cameras/`。健康检查、任务结果、视频完整性和重放分别验收。再次运行须更换输出目录或 episode ID，保留失败产物。
+
+两个固定变体只修改场景：`configs/collection/sweep_shifted.yaml` 将积木和区域沿工作区 Y 同移 +4 cm；`configs/collection/sweep_diagonal.yaml` 将目标区沿 Y 移 +5 cm，使扫动方向偏转约 14°。seed 不改变固定布局；不声称覆盖连续随机范围。使用相同采集命令替换 collection 和 episode ID 即可复现。
+
+抓柄失败检查腕部视频与 `brush/grasped_by`；接触阶段碰撞失败检查 `sweep_geometry` 事件、桌面和携带刷子包络；未入区检查 `sweep_metrics` 的工具接触、区域余量及侧向误差。任务失败保留结果，不放宽成功判据掩盖问题。
+
+### 首轮积木验证（固定 TCP 抬升，已替换）
+
+2026-09-16，三项固定场景各采集一次（seed 0），均通过任务及逐帧离线复核，三路视频完整性检查通过，`video_error: null`。完整回归测试 222 项通过，包括真实 CUDA 碰撞检查和工具扫动的防捷径判据；Ruff 的 E4/E7/E9/F 检查通过。记录、视频与关键帧集中在 `outputs/sweep/`，汇总为 `summary.json`，每项详细测量为 `<id>-report.json`。
+
+| 回合 | 任务结果／步数 | 距目标中心 | 工具接触采样数（20 Hz） | 最终工具离桌高度 |
+| --- | --- | --- | --- | --- |
+| `brush-01` | success / 283 | 1.81 mm | 69 | 5.06 cm |
+| `shifted-01` | success / 284 | 1.57 mm | 69 | 4.90 cm |
+| `diagonal-01` | success / 287 | 1.76 mm | 72 | 4.75 cm |
+
+三项夹爪—积木接触与夹持采样均为零，积木最低点相对桌面约 −0.15 mm，最大倾角低于 0.064°，最终工具均被握持。已检查正面和腕部的抓柄、扫动与抬起关键帧（`<id>-frames.jpg`）；完整视频为 `videos/<id>.mp4`。
+
+三项均执行物理重放，结果保存在 `replay/<id>-replay-comparison.json`：
+
+| 回合 | 重放检查 | 最大刷子位置／姿态偏差 | 最大积木位置偏差 | 任务结果一致 |
+| --- | --- | --- | --- | --- |
+| `brush-01` | 未通过 | 4.55 mm / 0.0572 rad | 1.94 mm | 否，重放到原终点时超时 |
+| `shifted-01` | 未通过 | 8.09 mm / 0.1014 rad | 0.91 mm | 是，仍成功 |
+| `diagonal-01` | 通过 | 4.55 mm / 0.0572 rad | 2.25 mm | 是，仍成功 |
+
+基线的差异已定位：原回合第 279 帧刷子最低点为 4.09 cm，重放该帧为 3.88 cm，晚一帧越过 4 cm 门槛；因此到第 283 步原回合累计 0.25 s，重放仅累计 0.20 s。位姿误差在现有容差内，但任务结果不一致，仍记失败。侧移案例刷子位置和姿态偏差超过现有 5 mm／0.1 rad 重放容差，不能只因其任务成功而记重放通过。未延长原动作序列、修改判据或放宽重放容差。
+
+这轮确认了固定场景的实际工具扫动过程，尚未完成三项一致的物理重放验收。刷子在窄柄抓持下的重放位姿差异仍待定位；目前不能仅从这些数据断言是抓点、接触求解或其他初始化细节导致。原失败报告与视频均保留，后续改动需同时复核任务效果和重放。
+
+### 扫动物体替换
+
+在相同的手持刷、部署、目标区与速度下，增加浅盘、鼠标和华夫饼三个目标。仅替换场景物体与角色绑定，并按源包围盒底部设置受支撑初态；原积木保留回归。新对象从已有完整 USD 准备，不补质量、不改摩擦或碰撞，不按对象放宽任务判据。
+
+| collection | 目标与接触特点 |
+| --- | --- |
+| `configs/collection/sweep_plate.yaml` | 已接入的 13 cm 圆形浅盘，检验圆边与较宽轮廓 |
+| `configs/collection/sweep_mouse.yaml` | 11.2 × 7.3 × 3.7 cm 鼠标，检验弧面侧壁 |
+| `configs/collection/sweep_waffle.yaml` | 9.6 × 9.2 × 3.2 cm 华夫饼，检验带格纹的较宽接触面；物理表示为刚体 |
+
+工作目录为仓库根目录，环境与基础资产前置条件同上一节。鼠标和华夫饼首次接入时先准备，随后逐项健康检查、采集及离线检查：
+
+```bash
+python scripts/prepare_assets.py scene --source-root .cache/assets/source-links \
+  --scene-asset robodojo:mouse --scene-asset robodojo:waffle
+for variant in plate mouse waffle; do
+  python scripts/check_scene_assets.py --collection configs/collection/sweep_${variant}.yaml \
+    --output-dir outputs/sweep-objects/${variant}-health
+  # 确认该项健康检查通过后采集；失败时先查 validation.json。
+  python scripts/collect.py --collection configs/collection/sweep_${variant}.yaml \
+    --output-dir outputs/sweep-objects --episode-id ${variant}-01 --seed 0
+  python scripts/inspect_data.py episode outputs/sweep-objects/episodes/${variant}-01 \
+    > outputs/sweep-objects/${variant}-01-report.json
+done
+```
+
+浅盘已是基础资产；若尚未准备，运行前不带 `--scene-asset` 执行统一准备。每项只有一个固定初态，seed 不改变布局。视频在 `outputs/sweep-objects/videos/`，三路原视频和状态在 `episodes/<id>/`。重复运行改输出目录或 ID，避免覆盖既有证据。逐回合物理重放入口仍是 `scripts/replay_episode.py <episode> --output-dir outputs/sweep-objects/replay`。
+
+首轮浅盘 `plate-01` 与鼠标 `mouse-01` 均已入区，但刷子在夹爪内转动后刷头仍靠近桌面，固定 TCP 抬高 8 cm 不足以让整把工具离桌，两项均在 900 步超时。这是实际失败，不按“目标已入区”改判成功。原轨迹、视频和离线报告全部保留。
+
+据此将收尾改为上述实测工具高度反馈，沿用原物理值、扫动路径高度、速度与成功门槛。更新后三个对象均触发一次 `retreat_clearance_retry`，完成额外抬升后通过任务判据和逐帧离线复核：
+
+| 回合 | 结果／步数 | 距区域中心 | 最终整把刷子离桌 | 目标最大倾角 |
+| --- | --- | --- | --- | --- |
+| `plate-02` | success / 309 | 4.74 mm | 6.20 cm | 4.17° |
+| `mouse-02` | success / 309 | 3.89 mm | 5.22 cm | 0.54° |
+| `waffle-01` | success / 306 | 4.04 mm | 5.56 cm | 0.06° |
+
+所有回合保留三路视频，三个成功回合视频完整性检查通过，夹爪直接接触目标与夹持目标采样均为零；目标完整处于区域内且最终工具仍握住。浅盘在撤离阶段有小幅倾斜，最大包围盒最低点偏差约 −3.33 mm，仍在原 5 mm 门槛内；此值是包围盒测量，不等同于真实表面穿透深度。鼠标和华夫饼的最大倾角更小。实景图中的华夫饼为带格纹、边缘圆润的外形，按源刚体碰撞扫动。
+
+三项健康检查通过；运行质量分别为浅盘约 0.0766 kg、鼠标 0.09 kg、华夫饼 0.08 kg，均与 USD 一致。汇总在 `outputs/sweep-objects/summary.json`，关键帧在 `<id>-frames.jpg`，视频在 `videos/<id>.mp4`。本轮完整回归 230 项通过，新增检查覆盖按几何接纳目标、过低目标拒绝、实测高度收尾和有界补偿。
+
+三个新对象均执行物理重放，均再次得到任务 `success`，但只有浅盘通过全部现有误差检查：
+
+| 原回合 | 重放检查 | 工具最大位置／姿态偏差 | 目标最大位置偏差 |
+| --- | --- | --- | --- |
+| `plate-02` | 通过 | 4.55 mm / 0.0572 rad | 4.44 mm |
+| `mouse-02` | 未通过 | 11.74 mm / 0.1464 rad | 6.47 mm |
+| `waffle-01` | 未通过 | 13.95 mm / 0.1713 rad | 3.74 mm |
+
+对应报告为 `outputs/sweep-objects/replay/<id>-replay-comparison.json`。鼠标与华夫饼仍超过原工具重放容差，鼠标目标自身也超过 5 mm；任务结果一致不能替代误差验收。反馈抬升解决的是本轮收尾时刷头未离桌的问题，不代表消除了抓持转动或重放差异。工具规划包络来自抬升后的实测抓持变换，未逐帧追踪接触中的相对转动；当前只验收无遮挡直线场景，不能推广为复杂障碍下的工具避碰保证。
+
+同一实现下重新采集原积木 `outputs/sweep-objects/episodes/brick-regression`，283 步成功、离线判据及视频完整性检查通过；本轮未重放该新积木回合，原积木重放历史见前节。三个新对象的重放三路视频完整性检查也通过；误差检查失败与视频损坏是不同结果。

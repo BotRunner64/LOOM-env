@@ -98,7 +98,9 @@ class ArmPlanner:
             name=name, dims=list(size), pose=local[[0, 1, 2, 6, 3, 4, 5]].tolist()
         )
 
-    def update_world(self, observation, truth, *, allow_object_contact):
+    def update_world(
+        self, observation, truth, *, allow_object_contact, contact_objects=()
+    ):
         boxes = []
         other = "left" if self.side == "right" else "right"
         arm = self.deployment.arms[other]
@@ -137,21 +139,38 @@ class ArmPlanner:
             if self.planner.graph_planner is not None:
                 self.planner.graph_planner.reset_buffer()
         exclude_target = allow_object_contact or self.attached
-        checker.enable_obstacle(self.target_object, not exclude_target)
-        return len(boxes) + len(meshes) - int(exclude_target)
+        excluded = set(contact_objects)
+        if not excluded <= self.meshes.keys():
+            raise ValueError("Contact object is not a planning obstacle")
+        if exclude_target:
+            excluded.add(self.target_object)
+        for name in self.meshes:
+            checker.enable_obstacle(name, name not in excluded)
+        return len(boxes) + len(meshes) - len(excluded)
 
-    def attach(self, observation, truth):
+    def attach(self, observation, truth, *, max_cell_size=None):
         """Planning geometry only; the simulator object remains a free rigid body."""
         obj = self.target_object
         low, high = np.asarray(
             asset_definition(self.scene.objects[obj]["asset"]).bounds
         )
         size = high - low
-        centers = (low + high) / 2 + np.asarray(
-            list(product((-1, 1), repeat=3))
-        ) * size / 4
-        # Each sphere covers one octant of the object envelope, including its corners.
-        spheres = np.c_[centers, np.full(8, np.linalg.norm(size / 4))]
+        counts = (
+            np.full(3, 2)
+            if max_cell_size is None
+            else np.maximum(1, np.ceil(size / max_cell_size).astype(int))
+        )
+        cell = size / counts
+        centers = np.asarray(
+            list(
+                product(
+                    *[low[i] + (np.arange(counts[i]) + 0.5) * cell[i] for i in range(3)]
+                )
+            )
+        )
+        # Cover every cell, including its corners. Finer cells reduce excess
+        # padding for a long tool near the table without under-covering its box.
+        spheres = np.c_[centers, np.full(len(centers), np.linalg.norm(cell / 2))]
         self.attachment.update(
             torch.tensor(spheres, device="cuda:0", dtype=torch.float32),
             self._state(observation.values[f"robot/{self.side}/joint_position"]),
@@ -165,9 +184,20 @@ class ArmPlanner:
         self.attachment.detach()
         self.attached = False
 
-    def plan(self, observation, truth, goal_world, *, allow_object_contact=False):
+    def plan(
+        self,
+        observation,
+        truth,
+        goal_world,
+        *,
+        allow_object_contact=False,
+        contact_objects=(),
+    ):
         obstacle_count = self.update_world(
-            observation, truth, allow_object_contact=allow_object_contact
+            observation,
+            truth,
+            allow_object_contact=allow_object_contact,
+            contact_objects=contact_objects,
         )
         goal = GoalToolPose.from_poses(
             {
@@ -212,20 +242,26 @@ class ArmPlanner:
             "self_collision": True,
             "attached_object": self.attached,
             "target_contact_allowed": allow_object_contact,
+            "contact_objects": list(contact_objects),
             "time_scale": 2.0,
         }
 
-    def cartesian_step(self, observation, truth, goal_world):
+    def cartesian_step(self, observation, truth, goal_world, *, contact_objects=()):
         """Small damped-Jacobian step for contact; validate sampled joint motion.
 
-        The target remains a free PhysX body. Only its planning obstacle is
-        disabled; table, other objects, held arm, and self collision remain.
+        Objects remain free PhysX bodies. Disable only the grasp target and
+        explicit contact objects; other scene, held-arm and self collision remain.
         """
         if not hasattr(self, "servo_model"):
             self.servo_model = Kinematics(
                 self.planner.kinematics.config, compute_jacobian=True
             )
-        self.update_world(observation, truth, allow_object_contact=True)
+        self.update_world(
+            observation,
+            truth,
+            allow_object_contact=True,
+            contact_objects=contact_objects,
+        )
         q = np.asarray(observation.values[f"robot/{self.side}/joint_position"])
         measured = np.asarray(observation.values[f"robot/{self.side}/tcp_pose_world"])
         local_measured, local_goal = (

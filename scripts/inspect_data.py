@@ -108,9 +108,13 @@ def main():
                         "upward_displacement_m": None
                         if task.exchange_position is None
                         else float(position[2] - task.exchange_position[2]),
-                        "final_clearance_m": float(points[:, 2].min() - task.support[2]),
+                        "final_clearance_m": float(
+                            points[:, 2].min() - task.support[2]
+                        ),
                         "final_linear_speed_m_s": float(np.linalg.norm(velocity[:3])),
-                        "final_angular_speed_rad_s": float(np.linalg.norm(velocity[3:])),
+                        "final_angular_speed_rad_s": float(
+                            np.linalg.norm(velocity[3:])
+                        ),
                         "verified_stable_time_s": task.elapsed
                         if task.phase == "receiver"
                         else 0.0,
@@ -126,6 +130,7 @@ def main():
             if manifest["spec"]["collection"]["task"]["id"] in {
                 "push_object",
                 "push_into_region",
+                "sweep_into_region",
             }:
                 import numpy as np
 
@@ -165,7 +170,10 @@ def main():
                         ),
                         "sample_period_s": reader.spec.collection.deployment.control_dt,
                     }
-                    if reader.spec.collection.task.id == "push_into_region":
+                    if reader.spec.collection.task.id in {
+                        "push_into_region",
+                        "sweep_into_region",
+                    }:
                         result["push_metrics"].pop("goal_radius_m")
                         result["push_metrics"].update(
                             region_pose_world=task.region_pose.tolist(),
@@ -175,6 +183,39 @@ def main():
                                 np.degrees(max(m["tilt"] for m in samples))
                             ),
                         )
+                    if reader.spec.collection.task.id == "sweep_into_region":
+                        metrics = result.pop("push_metrics")
+                        metrics.pop("non_target_max_xy_displacement_m")
+                        metrics["finger_contact_samples"] = metrics.pop(
+                            "contact_samples"
+                        )
+                        metrics.update(
+                            tool_contact_samples=sum(
+                                m["tool_contact_force"]
+                                > task.parameters["contact_force"]
+                                for m in samples
+                            ),
+                            max_tool_contact_force_n=max(
+                                m["tool_contact_force"] for m in samples
+                            ),
+                            final_tool_clearance_m=samples[-1]["tool_clearance"],
+                            final_tool_grasped=samples[-1]["tool_grasped"],
+                        )
+                        task.reset(reader.world_state(0))
+                        metrics["recomputed_outcome"] = None
+                        for k in range(1, len(reader) + 1):
+                            status = task.update(
+                                reader.world_state(k),
+                                reader.spec.collection.deployment.control_dt,
+                            )
+                            if status.outcome is not None:
+                                metrics["recomputed_outcome"] = {
+                                    "step": k,
+                                    "code": status.outcome.code,
+                                    "reason": status.outcome.reason,
+                                }
+                                break
+                        result["sweep_metrics"] = metrics
         else:
             result = {
                 "episodes": build_index(args.root, args.output),

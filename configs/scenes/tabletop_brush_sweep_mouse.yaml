@@ -1,0 +1,30 @@
+id: tabletop_brush_sweep_mouse
+objects:
+  table:
+    asset: maniskill:table
+    category: workspace
+    description: 木质餐桌
+    static: true
+    pose: [0, 0, 0, 0, 0, 0, 1]
+  brush:
+    asset: robodojo:hand_brush
+    category: graspable_object
+    description: 黄色手持刷
+    static: false
+    # Local Y points up; rigid bristles face the table, handle points +Y.
+    pose: [-0.10, -0.20, 0.0413928218, 0.7071067812, 0, 0, 0.7071067812]
+  mouse:
+    asset: robodojo:mouse
+    category: graspable_object
+    description: 弧面电脑鼠标
+    static: false
+    pose: [0.02, -0.20, 0.01828800141811371, 0, 0, 0, 1]
+  storage:
+    asset: loom:storage_zone
+    category: target_region
+    description: 桌面收纳标线
+    static: true
+    pose: [0.22, -0.20, 0, 0, 0, 0, 1]
+parameters:
+  workspace_pose: [0.45, 0, 0.75, 0, 0, 0, 1]
+  workspace_size: [0.96, 1.9]

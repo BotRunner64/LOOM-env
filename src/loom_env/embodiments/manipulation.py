@@ -1,17 +1,17 @@
 """Reviewed grasp geometry and native planner models for supported embodiments."""
 
-from dataclasses import dataclass
-from itertools import combinations
 import json
 import xml.etree.ElementTree as ET
+from dataclasses import dataclass
+from itertools import combinations
 from pathlib import Path
 
 import numpy as np
 import yaml
 
 from loom_env.embodiments.assets import (
-    PANDA_ASSET,
     MODELS,
+    PANDA_ASSET,
     model_name,
     prepared_urdf,
     sha256,
@@ -177,7 +177,7 @@ def planner_robot(arm, asset_root):
         robot = {"robot_cfg": {"kinematics": kin}}
     else:
         robot = _urdf_planner_robot(arm, asset_root)
-    robot["robot_cfg"]["kinematics"]["extra_collision_spheres"] = {"attached_object": 8}
+    robot["robot_cfg"]["kinematics"]["extra_collision_spheres"] = {"attached_object": 128}
     return robot
 
 

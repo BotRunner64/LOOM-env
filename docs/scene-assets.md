@@ -10,6 +10,9 @@
 | `robodojo:tea_carton_pack` | 双 Panda 交接候选 | 源 `Clutter/tissue/00001`，描述为六盒茶饮包装；交接效果仍待验收 |
 | `robodojo:juice_carton` | 横放单盒果汁交接变体 | 源 `Rigid/juice_carton/00000`，保留吸管外观和源碰撞；质量 0.12 kg、摩擦 0.3 来自既有 USD；运行结果见[交接变体](implementation.md#交接的少量物体与布局变体) |
 | `robodojo:brick` | 动态操作对象 | 保留源动态刚体和凸分解碰撞；补充 Panda 抓取中心 |
+| `robodojo:hand_brush` | 持工具扫动 | 源 `Rigid/broom/00000`，刚体刷毛与 22 mm 宽柄部；完整 USD 质量 0.04 kg、摩擦 0.45，见[扫动说明](implementation.md#持工具扫物体入区域) |
+| `robodojo:mouse` | 弧面物体扫动变体 | 源 `Rigid/mouse/00004`，约 11.2 × 7.3 × 3.7 cm；完整 USD 质量 0.09 kg、摩擦 0.45 |
+| `robodojo:waffle` | 格纹物体扫动变体 | 源 `Rigid/waffle/00000`，约 9.6 × 9.2 × 3.2 cm；完整 USD 质量 0.08 kg、摩擦 0.65，按刚体处理 |
 | `robodojo:basket` | 动态目标容器 | 保留源动态刚体和 SDF 碰撞；记录局部放置区域，随实测容器位姿更新 |
 | `robodojo:plate` | 推上餐垫的浅盘 | 源凸分解碰撞，约 13 cm 直径；Panda 推动接触高度标注 |
 | `robodojo:box` | 推入收纳区的打开纸盒 | 源盒壁／翻盖与碰撞，翻盖不可动；Panda 推动接触高度标注 |
