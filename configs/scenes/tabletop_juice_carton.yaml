@@ -1,0 +1,18 @@
+id: tabletop_juice_carton
+objects:
+  table:
+    asset: maniskill:table
+    category: workspace
+    description: 木质餐桌
+    static: true
+    pose: [0, 0, 0, 0, 0, 0, 1]
+  juice_carton:
+    asset: robodojo:juice_carton
+    category: graspable_object
+    description: 带吸管的单盒橙汁
+    static: false
+    # Lay the carton on its broad side: local Z points along world -Y.
+    pose: [0, 0, 0.0252922364, 0.7071067812, 0, 0, 0.7071067812]
+parameters:
+  workspace_pose: [0.45, 0, 0.75, 0, 0, 0, 1]
+  workspace_size: [0.96, 1.9]

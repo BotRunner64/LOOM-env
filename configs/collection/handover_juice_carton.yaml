@@ -1,0 +1,9 @@
+task: ../tasks/handover_object.yaml
+deployment: ../deployments/dual_panda.yaml
+scene: ../scenes/tabletop_juice_carton.yaml
+role_bindings:
+  target_object: juice_carton
+arm_roles:
+  giver: left
+  receiver: right
+max_steps: 1200

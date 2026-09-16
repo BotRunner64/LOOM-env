@@ -335,3 +335,57 @@ python scripts/replay_episode.py outputs/handover/episodes/tea-demo \
 准备来源与自包含物理定义见[资产指南](scene-assets.md)。已有本地源布局 `.cache/assets/source-links` 可作为 `--source-root`；`--scene-asset robodojo:tea_carton_pack` 只重建该物体，旧版桌面等依赖仍须重建。反向配置为 `configs/collection/handover_reverse.yaml`，同时交换两臂角色和物体朝向。两份场景固定布局，seed 不改变布局。
 
 采集自动输出轨迹目录、三路相机及 `outputs/handover/videos/<id>.mp4`。必须观察释放之后是否持续独立拿稳，并检查速度、离桌高度与重放结果；日志成功不能替代视频验收。资产健康检查通过只代表物理定义与静置有效，不代表交接成功。
+
+### 交接的少量物体与布局变体
+
+沿用双 Panda 自动抓点、现有控制与任务判据，增加三个固定案例。所有位置变化均相对于桌面工作区；seed 不改变这三份固定布局。它们检验小范围变化，不代表连续采样范围已通过。
+
+| collection | 相对基线的变化 |
+| --- | --- |
+| `configs/collection/handover_shifted.yaml` | 六盒茶饮包装沿工作区 X 平移 +5 cm |
+| `configs/collection/handover_yaw15.yaml` | 六盒茶饮包装绕世界 Z 从 90° 转到 105°，中心不变 |
+| `configs/collection/handover_juice_carton.yaml` | 换为横放单盒果汁；局部 Z 长轴转到世界 −Y，夹爪横跨约 6.74 cm 宽度 |
+
+果汁盒引用库内已有完整 USD，未修改质量、摩擦或碰撞。外观包含吸管，源包围盒整体尺寸约 6.74 × 5.11 × 18 cm；两抓点仍由运行重心和统一规则生成。几何门槛不保证接触一定有效。
+
+复现：工作目录为仓库根目录，激活 `loom-env`，按[环境说明](environment.md)完成 EULA、GPU/Vulkan 配置，确保 Panda、桌面与茶饮包装资产已准备。准备新增果汁盒、检查物理状态，再顺序采集：
+
+```bash
+python scripts/prepare_assets.py scene --source-root .cache/assets/source-links \
+  --scene-asset robodojo:juice_carton
+python scripts/check_scene_assets.py --collection configs/collection/handover_juice_carton.yaml \
+  --output-dir outputs/handover-variants/juice-health
+for variant in juice_carton shifted yaw15; do
+  python scripts/collect.py --collection configs/collection/handover_${variant}.yaml \
+    --output-dir outputs/handover-variants --episode-id ${variant}-01 --seed 0 --max-steps 700
+  python scripts/inspect_data.py episode outputs/handover-variants/episodes/${variant}-01 \
+    > outputs/handover-variants/${variant}-01-report.json
+done
+```
+
+再次运行须换输出目录或 episode ID。采集任务失败／超时返回非零状态，但完整回合仍保存供分析；先检查 `RESULT`、`video_error` 和完整性报告，再看视频。视频在 `outputs/handover-variants/videos/`，每回合三路原视频在 `episodes/<id>/cameras/`。新增物体健康检查应为 `passed: true`，实测质量约 0.12 kg。交接效果需分别检查递出释放、接收独立抬升、物体滑移及任务判据，不能从健康检查推断。
+
+2026-09-16 验证结果（每项 seed 0，最多 700 步）：
+
+| 回合 | 任务结果／步数 | 接收独立向上位移 | 末帧线速度 | 末帧角速度 |
+| --- | --- | --- | --- | --- |
+| `shifted-01` | success / 534 | 8.21 cm | 0.0171 m/s | 0.0965 rad/s |
+| `yaw15-01` | timeout / 700 | 8.59 cm | 0.0308 m/s | 0.1721 rad/s |
+| `juice_carton-01` | timeout / 700 | 8.80 cm | 0.0174 m/s | 0.9514 rad/s |
+
+三项均进入接收独立抬升后的等待阶段，末帧仅接收臂有抓持、递出接触力为零。平移案例连续满足 1 秒抓稳条件，离线复核也在第 534 步判定成功；其余两项未满足该条件。三个回合的三路视频哈希、帧数与 T/T+1 对齐检查均通过，`video_error` 均为 null。已检查初态、接收闭合、递出撤离与末帧的正面／接收腕部画面；茶饮包装在抬升后仍被正面取景上沿部分裁切，需结合腕部视频观察。
+
+证据集中在 `outputs/handover-variants/`：`summary.json`、`<id>-report.json`、`<id>-frames.jpg`，以及上述轨迹和视频目录。固定案例的小样本不构成成功率估计。相关现有测试 82 项通过，Ruff 检查通过。日志仍有[已记录的上游启动警告](environment.md#采集日志与已知剩余问题)，不以任务产物存在代替日志说明。
+
+对新增物体及通过判据的布局案例执行物理重放：
+
+```bash
+for variant in juice_carton shifted; do
+  python scripts/replay_episode.py outputs/handover-variants/episodes/${variant}-01 \
+    --output-dir outputs/handover-variants/replay
+done
+```
+
+重放测量写入 `replay/<id>-replay-comparison.json`；应检查其中 `passed`、`outcome_matches` 和误差，而不仅检查重放视频是否生成。转向案例本轮仅采集和离线复核，未执行物理重放。
+
+本轮两项物理重放均 `passed: true`、`outcome_matches: true`，重放三路视频完整性检查通过。果汁盒最大位置／姿态偏差为 0.180 mm／0.00230 rad，平移茶饮包装为 0.816 mm／0.01587 rad；均在现有容差内。重放分别复现原超时与成功结果，不能将“重放通过”理解为原交接任务均成功。

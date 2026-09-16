@@ -1,0 +1,9 @@
+task: ../tasks/handover_object.yaml
+deployment: ../deployments/dual_panda.yaml
+scene: ../scenes/tabletop_tea_carton_pack_shifted.yaml
+role_bindings:
+  target_object: tea_pack
+arm_roles:
+  giver: left
+  receiver: right
+max_steps: 1200

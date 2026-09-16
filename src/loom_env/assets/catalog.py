@@ -37,6 +37,19 @@ class AssetDefinition:
 
 TABLE_SCALE = 0.75 / 0.5255104303359985
 ASSETS = {
+    "robodojo:juice_carton": AssetDefinition(
+        "juice_carton",
+        "https://huggingface.co/datasets/RoboDojo-Benchmark/RoboDojo",
+        "a14409d7fae673c00499e01fd88b4457df6351b1",
+        "RoboDojo/Assets/Object/RoboDojo/Rigid/juice_carton/00000/object.usda",
+        "7696cb3300ce0caac3cd127609b8544952e5f862799d34837569eaff5d888a11",
+        "graspable_object",
+        (
+            (-0.03375473991036415, -0.025292236357927322, -0.09011700749397278),
+            (0.03359805792570114, 0.025788072496652603, 0.0898829847574234),
+        ),
+        dynamic=True,
+    ),
     "robodojo:tea_carton_pack": AssetDefinition(
         "tea_carton_pack",
         "https://huggingface.co/datasets/RoboDojo-Benchmark/RoboDojo",

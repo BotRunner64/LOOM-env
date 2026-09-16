@@ -8,6 +8,7 @@
 | --- | --- | --- |
 | `maniskill:table` | 桌面工作区 | 源 GLB 转 USD，桌面顶中心作为原点；桌板为长方体，桌腿保留静态三角网格 |
 | `robodojo:tea_carton_pack` | 双 Panda 交接候选 | 源 `Clutter/tissue/00001`，描述为六盒茶饮包装；交接效果仍待验收 |
+| `robodojo:juice_carton` | 横放单盒果汁交接变体 | 源 `Rigid/juice_carton/00000`，保留吸管外观和源碰撞；质量 0.12 kg、摩擦 0.3 来自既有 USD；运行结果见[交接变体](implementation.md#交接的少量物体与布局变体) |
 | `robodojo:brick` | 动态操作对象 | 保留源动态刚体和凸分解碰撞；补充 Panda 抓取中心 |
 | `robodojo:basket` | 动态目标容器 | 保留源动态刚体和 SDF 碰撞；记录局部放置区域，随实测容器位姿更新 |
 | `robodojo:plate` | 推上餐垫的浅盘 | 源凸分解碰撞，约 13 cm 直径；Panda 推动接触高度标注 |
@@ -88,7 +89,7 @@ python scripts/check_asset_library.py
 
 复制入口只复制几何包并安装 USDA；源和目标必须是独立目录。约需 8 GiB 空间，不需要 GPU。相同文件复用，内容冲突报错。`manifest.json` 保存来源、逐文件哈希、依赖检查和物理就绪状态，不给加载器提供物理参数。标准 MDL 模块由 Isaac Sim 提供。
 
-全库检查覆盖 459 个 RoboDojo 入口、5 个 Isaac Sim 入口和 8 个任务资产，从实际 USD 检查单刚体、质量、碰撞和绑定材质。单刚体可以位于子节点；检查器会验证该刚体的质量和碰撞材质，不因层级不同误判属性缺失。输出 `outputs/asset-physics/library-audit.json`，当前 472 个入口通过、0 个待处理；有待处理项时退出码为 1。定义完整不代表已完成具体场景的物理验收。
+迁移时全库检查覆盖 459 个 RoboDojo 入口、5 个 Isaac Sim 入口和当时的 8 个任务资产，从实际 USD 检查单刚体、质量、碰撞和绑定材质。单刚体可以位于子节点；检查器会验证该刚体的质量和碰撞材质，不因层级不同误判属性缺失。输出 `outputs/asset-physics/library-audit.json`，该次 472 个入口通过、0 个待处理；有待处理项时退出码为 1。定义完整不代表已完成具体场景的物理验收。
 
 本次清理移除了 178 个 RoboDojo 和 10 个 Isaac Sim 候选：缺质量或摩擦定义的模型不猜测补值，缺刚体／碰撞的模型不为扩充库而重建。四个物理定义完整、刚体位于子节点的彩色积木保留，未修改源 USD。移除记录位于 `outputs/asset-physics/library-prune.json`；清理只作用于 LOOM 本地物体库及配置，共享上游资产不变。实际场景准备仍要求目录中所选物体的入口满足对应场景接口，新增子节点刚体模型时需一并验证位姿与重置。
 以后新增物体先提供完整 USD。确需修改资产物理值时直接修改对应 USD 定义，更新固定哈希并重新准备；不新增 Python 属性表、JSON 物理 sidecar 或加载时覆盖。全库报告只用于查看与验收，不参与仿真加载。
