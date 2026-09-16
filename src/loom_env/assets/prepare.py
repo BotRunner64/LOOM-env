@@ -1,16 +1,16 @@
 """Reference pinned USD assets unchanged; convert mesh-only workspaces."""
 
-from dataclasses import asdict
 import importlib.metadata
 import json
-from pathlib import Path
 import shutil
 import subprocess
 import sys
+from dataclasses import asdict
+from pathlib import Path
 
 import numpy as np
 
-from .catalog import ASSETS, PREPARATION_VERSION, prepared_directory, sha256
+from .catalog import ASSETS, prepared_directory, sha256
 
 
 def source_physics(stage):
@@ -231,9 +231,7 @@ def prepare_scene_assets(asset_root, source_root):
             raise ValueError(f"Cached USDZ physics differs from source: {asset_id}")
         manifest = {
             "asset_id": asset_id,
-            "definition": definition.fingerprint,
             "source": asdict(definition),
-            "preparation_version": PREPARATION_VERSION,
             "bounds": actual.tolist(),
             "source_collision_triangles": source_triangle_count,
             "collision_representation": "box_top_and_source_legs"

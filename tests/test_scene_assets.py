@@ -4,7 +4,6 @@ import shutil
 import pytest
 
 from loom_env.assets.catalog import (
-    PREPARATION_VERSION,
     asset_definition,
     load_prepared,
     prepared_directory,
@@ -52,8 +51,6 @@ def prepared_fixture(root):
         (directory / name).write_bytes(b"integrity-test-content")
     manifest = {
         "asset_id": key,
-        "definition": asset_definition(key).fingerprint,
-        "preparation_version": PREPARATION_VERSION,
         "files": {
             name: sha256(directory / name)
             for name in ("asset.usda", "collision.npz", "source.usdz")
@@ -72,13 +69,11 @@ def test_modified_asset_or_collision_cache_is_rejected(tmp_path, name):
         load_prepared(tmp_path, key)
 
 
-@pytest.mark.parametrize("change", ["missing", "stale", "escape", "incomplete"])
+@pytest.mark.parametrize("change", ["missing", "escape", "incomplete"])
 def test_unusable_prepared_assets_are_rejected(tmp_path, change):
     key, directory, manifest = prepared_fixture(tmp_path)
     if change == "missing":
         (directory / "asset.usda").unlink()
-    elif change == "stale":
-        manifest["definition"] = "different-annotations"
     elif change == "escape":
         manifest["files"]["../outside.usd"] = "unexpected"
     else:

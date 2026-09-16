@@ -1,8 +1,8 @@
 """Small, explicit inventory of reviewed source models and local annotations."""
 
-from dataclasses import asdict, dataclass
 import hashlib
 import json
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -32,11 +32,6 @@ class AssetDefinition:
     source_scale: float = 1.0
     source_translation: tuple[float, float, float] = (0.0, 0.0, 0.0)
 
-    @property
-    def fingerprint(self):
-        return hashlib.sha256(
-            json.dumps(asdict(self), sort_keys=True).encode()
-        ).hexdigest()
 
 
 TABLE_SCALE = 0.75 / 0.5255104303359985
@@ -135,7 +130,6 @@ ASSETS = {
         ((-0.11, -0.11, 0), (0.11, 0.11, 0.001)),
     ),
 }
-PREPARATION_VERSION = 5
 
 
 def asset_definition(asset_id):
@@ -155,8 +149,7 @@ def prepared_directory(root, asset_id):
 
 
 def load_prepared(root, asset_id):
-    """Reject missing, stale or modified prepared assets before launching physics."""
-    definition = asset_definition(asset_id)
+    """Load existing prepared assets, checking file presence and integrity."""
     directory = prepared_directory(root, asset_id)
     path = directory / "asset.json"
     if not path.is_file():
@@ -164,11 +157,6 @@ def load_prepared(root, asset_id):
             f"Unprepared asset {asset_id}; run scripts/prepare_assets.py scene"
         )
     manifest = json.loads(path.read_text())
-    if (
-        manifest.get("definition") != definition.fingerprint
-        or manifest.get("preparation_version") != PREPARATION_VERSION
-    ):
-        raise ValueError(f"Stale preparation for {asset_id}; prepare it again")
     if not {"asset.usda", "collision.npz"} <= manifest.get("files", {}).keys():
         raise ValueError(f"Incomplete prepared asset: {asset_id}")
     for relative, expected in manifest["files"].items():
