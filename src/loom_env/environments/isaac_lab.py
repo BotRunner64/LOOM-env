@@ -325,6 +325,9 @@ class ManipulationEnvironment(ManagerBasedEnv):
                 {
                     f"{name}/pose_world": pose,
                     f"{name}/velocity_world": velocity,
+                    f"{name}/center_of_mass_local": (
+                        data.body_com_pose_b.torch[0, 0, :3].cpu().numpy().copy()
+                    ),
                     f"{name}/grasped_by": np.asarray(grasped, dtype=bool),
                     f"{name}/finger_contact_forces_world": np.asarray(contacts),
                 }
@@ -476,12 +479,20 @@ class ManipulationEnvironment(ManagerBasedEnv):
                 },
                 "initialization_steps": self.control_step,
                 "controllers": self.robot.controller_parameters,
+                "articulation_solver": {
+                    side: {
+                        "position_iterations": robot.cfg.spawn.articulation_props.solver_position_iteration_count,
+                        "velocity_iterations": robot.cfg.spawn.articulation_props.solver_velocity_iteration_count,
+                    }
+                    for side, robot in self.robot.robots.items()
+                },
                 "manipulation_profiles": {
                     side: plain(manipulation_profile(arm))
                     for side, arm in self.collection.deployment.arms.items()
                 },
                 "gravity_compensation": True,
                 "external_forces_every_iteration": self.cfg.sim.physics.enable_external_forces_every_iteration,
+                "solve_articulation_contact_last": self.cfg.sim.physics.solve_articulation_contact_last,
                 "camera_mounts": self.camera_mounts.resolved,
                 "camera_intrinsics": {
                     camera.name: self.scene[f"camera_{camera.name}"]

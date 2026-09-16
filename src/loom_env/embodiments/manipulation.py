@@ -29,6 +29,11 @@ class ParallelJaw:
     grasp_rotation: tuple[float, float, float, float]
     # Fixed mounting contact; omit only from the moving arm collision model.
     mounting_contact_bodies: tuple[str, ...] = ()
+    # Extents along tool X for side-by-side, top-down handover. Panda's fixed
+    # wrist sphere has radius 45 mm; finger spheres have radius 11 mm in the
+    # pinned planner model. Other embodiments are not yet reviewed for this.
+    handover_half_span: float | None = None
+    finger_half_span: float | None = None
 
 
 PROFILES = {
@@ -37,6 +42,8 @@ PROFILES = {
         ("panda_leftfinger", "panda_rightfinger"),
         (0.0, 0.0, 0.1034),
         (1.0, 0.0, 0.0, 0.0),
+        handover_half_span=0.045,
+        finger_half_span=0.011,
     ),
     "robotwin:piper": ParallelJaw(
         "link6",

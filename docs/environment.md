@@ -66,11 +66,11 @@ python scripts/check_env.py --sim
 - 非交互运行：已同意 EULA 时，可设置 `OMNI_KIT_ACCEPT_EULA=YES` 避免交互提示。
 - root 容器：仅在以 root 身份运行且启动被拒绝时，设置 `OMNI_KIT_ALLOW_ROOT=1`。
 
-当前节点使用 RTX 4090。若 Vulkan 未选择 NVIDIA ICD，在运行仿真前设置本节点路径：
+当前节点使用 RTX 5090。若 Vulkan 未选择 NVIDIA ICD，在运行仿真前设置本节点路径：
 
 ```bash
-export VK_DRIVER_FILES=/etc/vulkan/icd.d/nvidia_icd.json
-export VK_ICD_FILENAMES=/etc/vulkan/icd.d/nvidia_icd.json
+export VK_DRIVER_FILES=/usr/share/vulkan/icd.d/nvidia_icd.json
+export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nvidia_icd.json
 ```
 
 该路径属于宿主机配置，不是所有机器的通用要求。`nvidia-smi` 顶部的 CUDA 版本是驱动支持上限；实际 PyTorch CUDA 构建可用 `python -c 'import torch; print(torch.version.cuda)'` 查看。

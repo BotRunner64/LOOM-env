@@ -44,40 +44,9 @@ class HandoverExpert:
         )
         self.obj = collection.role_bindings["target_object"]
         self.asset = asset_definition(collection.scene.objects[self.obj]["asset"])
-        if (
-            self.asset.handover is None
-            or self.asset.handover_axis is None
-            or any(
-                arm.asset != PANDA_ASSET for arm in collection.deployment.arms.values()
-            )
-        ):
-            raise ValueError(
-                "Handover currently requires reviewed object annotations and dual Panda"
-            )
+        if any(arm.asset != PANDA_ASSET for arm in collection.deployment.arms.values()):
+            raise ValueError("Handover currently requires dual Panda")
         self.frame, _ = workspace(collection.scene)
-        self.sites = {
-            side: np.array(site)
-            for side, site in zip((self.giver, self.receiver), self.asset.handover)
-        }
-        self.axis_local = np.array(self.asset.handover_axis)
-        bounds = np.asarray(self.asset.bounds)
-        center = bounds.mean(axis=0)
-        corners = np.array(np.meshgrid(*bounds.T, indexing="ij")).reshape(3, -1).T
-        radius = np.linalg.norm(corners - center, axis=1).max()
-        receiver_offset = np.linalg.norm(self.sites[self.receiver] - center)
-        receiver_tool_offset = np.linalg.norm(
-            self.planners[self.receiver].profile.tcp_to_grasp
-        )
-        # Leave room for the object to rotate around the receiver fingers after
-        # release. The pivot is below the TCP, so both offsets matter for long,
-        # off-centre objects.
-        self.exchange_height = (
-            radius
-            + receiver_offset
-            + receiver_tool_offset
-            + collection.task.parameters["clearance"]
-            + collection.task.parameters["transfer_distance"]
-        )
         self.dt = collection.deployment.control_dt
         self.hold_time = max(0.6, collection.task.parameters["hold_time"] + self.dt)
 
@@ -86,6 +55,7 @@ class HandoverExpert:
             planner.planner.destroy()
 
     def reset(self, episode_input):
+        self._configure_grasps(self.world_state())
         self.command = initial_command(self.collection.deployment)
         self.index = self.step = self.stage_steps = self.path_index = self.stable = 0
         self.path = None
@@ -94,6 +64,70 @@ class HandoverExpert:
         self.lost = 0
         for planner in self.planners.values():
             planner.detach()
+
+    def _configure_grasps(self, world):
+        """One pair, centred around the USD-derived COM; no object annotations."""
+        bounds = np.asarray(self.asset.bounds, dtype=float)
+        size = bounds[1] - bounds[0]
+        center = bounds.mean(axis=0)
+        com = np.asarray(world[f"{self.obj}/center_of_mass_local"], dtype=float)
+        if com.shape != (3,) or not np.isfinite(com).all():
+            raise ValueError("Handover requires a finite USD-derived centre of mass")
+        axis_index = int(np.argmax(size))
+        self.axis_local = np.eye(3)[axis_index]
+        rotation = Rotation.from_quat(world[f"{self.obj}/pose_world"][3:])
+        axis = rotation.apply(self.axis_local)
+        if abs(axis[2]) > 0.5:
+            raise ValueError("Handover requires a roughly horizontal longest box axis")
+        down = np.array([0.0, 0.0, -1.0])
+        approach = down - np.dot(down, axis) * axis
+        approach /= np.linalg.norm(approach)
+        closing = np.cross(approach, axis)
+        width = float(np.abs(rotation.inv().apply(closing)) @ size)
+        profiles = [self.planners[side].profile for side in (self.giver, self.receiver)]
+        # Clearance is shared by all objects; dimensions belong to the robot.
+        separation = sum(p.handover_half_span for p in profiles) + 0.01
+        end_margin = max(p.finger_half_span for p in profiles)
+        for side in (self.giver, self.receiver):
+            opening = self.collection.deployment.arms[side].gripper.command_limits[0][1]
+            if width + 0.004 > opening:
+                raise ValueError(
+                    f"Handover object width {width:.3f} m exceeds {side} jaw opening"
+                )
+        lower = bounds[0, axis_index] + end_margin + separation / 2
+        upper = bounds[1, axis_index] - end_margin - separation / 2
+        if lower > upper:
+            raise ValueError("Handover object is too short for two separated grippers")
+        center[axis_index] = np.clip(com[axis_index], lower, upper)
+        bases = self.collection.deployment.arms
+        toward_giver = np.dot(
+            axis,
+            np.asarray(bases[self.giver].base_pose[:3])
+            - np.asarray(bases[self.receiver].base_pose[:3]),
+        )
+        sign = 1 if toward_giver >= 0 else -1
+        self.sites = {
+            self.giver: center + sign * separation / 2 * self.axis_local,
+            self.receiver: center - sign * separation / 2 * self.axis_local,
+        }
+        radius = np.linalg.norm(size / 2)
+        receiver_offset = np.linalg.norm(
+            self.sites[self.receiver] - bounds.mean(axis=0)
+        )
+        self.exchange_height = (
+            radius
+            + receiver_offset
+            + np.linalg.norm(self.planners[self.receiver].profile.tcp_to_grasp)
+            + self.collection.task.parameters["clearance"]
+            + self.collection.task.parameters["transfer_distance"]
+        )
+        self.grasp_geometry = {
+            "center_of_mass_local": com.tolist(),
+            "long_axis_local": self.axis_local.tolist(),
+            "sites_local": {side: point.tolist() for side, point in self.sites.items()},
+            "separation_m": separation,
+            "object_width_m": width,
+        }
 
     @property
     def stage(self):
@@ -109,7 +143,7 @@ class HandoverExpert:
     def _tcp(self, world, side, clearance=0.0):
         obj = world[f"{self.obj}/pose_world"]
         point = transform(obj, [*self.sites[side], 0, 0, 0, 1])[:3]
-        # Align the fingers across the handle; both tools approach from above.
+        # Align fingers across the box; both tools approach from above.
         axis = Rotation.from_quat(obj[3:]).apply(self.axis_local)
         # The object's long axis is a line, not a directed vector. Flipping the
         # object for the opposite giver must not rotate the gripper by 180°.
@@ -138,9 +172,7 @@ class HandoverExpert:
             measured[2] += 0.20
         elif self.stage == "giver_present":
             # Translate the measured grasp to the shared workspace without resetting object pose.
-            target = transform(
-                self.frame, [0, 0, self.exchange_height, 0, 0, 0, 1]
-            )[:3]
+            target = transform(self.frame, [0, 0, self.exchange_height, 0, 0, 0, 1])[:3]
             measured[:3] += target - world[f"{self.obj}/pose_world"][:3]
         elif self.stage == "giver_retreat":
             measured[2] += 0.15
@@ -190,6 +222,10 @@ class HandoverExpert:
                     "Handover lost the responsible arm's grasp", kind="skill"
                 )
         events = []
+        if self.step == 0:
+            events.append(
+                Event("planning", "handover_grasp_geometry", 0, self.grasp_geometry)
+            )
         side = self._side()
         slices = self.collection.deployment.action_slices
         arm_slice, grip_slice = slices[f"{side}/arm"], slices[f"{side}/gripper"]

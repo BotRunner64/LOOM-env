@@ -29,8 +29,8 @@ def main():
     try:
         if args.command == "config":
             spec = load_collection(args.path)
-            from loom_env.tasks import create_task
             from loom_env.scenes.workspace import sample_objects
+            from loom_env.tasks import create_task
 
             create_task(spec)
             sample_objects(spec.scene, 0)
@@ -88,16 +88,32 @@ def main():
                             break
                     final = reader.world_state(len(reader))
                     position = final[f"{task.object_name}/pose_world"][:3]
+                    velocity = final[f"{task.object_name}/velocity_world"]
+                    points, _ = task._state(final)
                     result["handover_metrics"] = {
+                        "grasp_geometry": next(
+                            (
+                                event["details"]
+                                for event in manifest["events"]
+                                if event["name"] == "handover_grasp_geometry"
+                            ),
+                            None,
+                        ),
                         "phase_transitions": transitions,
                         "grasp_samples": counts,
                         "recomputed_outcome": recomputed,
                         "final_grasped_by": final[
                             f"{task.object_name}/grasped_by"
                         ].tolist(),
-                        "independent_displacement_m": None
+                        "upward_displacement_m": None
                         if task.exchange_position is None
-                        else float(np.linalg.norm(position - task.exchange_position)),
+                        else float(position[2] - task.exchange_position[2]),
+                        "final_clearance_m": float(points[:, 2].min() - task.support[2]),
+                        "final_linear_speed_m_s": float(np.linalg.norm(velocity[:3])),
+                        "final_angular_speed_rad_s": float(np.linalg.norm(velocity[3:])),
+                        "verified_stable_time_s": task.elapsed
+                        if task.phase == "receiver"
+                        else 0.0,
                         "final_giver_contact_force_n": float(
                             np.linalg.norm(
                                 final[

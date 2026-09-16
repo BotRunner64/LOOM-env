@@ -96,22 +96,29 @@ def test_sliding_and_rotating_contacts_are_not_stable_holds(handover):
     rotating["tea_pack/velocity_world"][3] = 4.0
     assert tick(task, rotating, 40).outcome is None
     # Downward displacement, even after coming to rest, is not a lift proof.
-    assert tick(task, world((False, True), .94), 40).outcome is None
+    assert tick(task, world((False, True), 0.94), 40).outcome is None
     assert tick(task, world((False, True), 1.08), 19).outcome is None
-    assert task.update(world((False, True), 1.08), .05).outcome.code == "success"
+    assert task.update(world((False, True), 1.08), 0.05).outcome.code == "success"
 
 
 def test_expert_does_not_release_without_both_measured_grasps(handover):
     from types import SimpleNamespace
 
     from loom_env.experts.handover import HandoverExpert
+    from loom_env.embodiments.manipulation import manipulation_profile
     from loom_env.runtime.runner import SourceFailure
     from loom_env.specs.episode import Observation
 
     planners = {
-        side: SimpleNamespace(detach=lambda: None, profile=SimpleNamespace(tcp_to_grasp=(0, 0, 0.1034))) for side in ("left", "right")
+        side: SimpleNamespace(
+            detach=lambda: None,
+            profile=manipulation_profile(handover.deployment.arms[side]),
+        )
+        for side in ("left", "right")
     }
     state = world((True, False))
+    state["tea_pack/pose_world"][3:] = [0, 0, np.sqrt(0.5), np.sqrt(0.5)]
+    state["tea_pack/center_of_mass_local"] = np.zeros(3)
     expert = HandoverExpert(handover, planners, lambda: state)
     expert.reset(None)
     expert.index = expert.STAGES.index("receiver_close")
@@ -133,3 +140,83 @@ def test_expert_does_not_release_without_both_measured_grasps(handover):
     assert expert.stage == "receiver_close"
     assert expert.index < expert.STAGES.index("giver_release")
     assert expert.command[giver_slice][0] == 0.0
+
+
+@pytest.mark.parametrize("long_axis", [0, 1, 2])
+def test_automatic_grasps_follow_box_axis_com_and_arm_roles(handover, long_axis):
+    from types import SimpleNamespace
+    from scipy.spatial.transform import Rotation
+    from loom_env.embodiments.manipulation import manipulation_profile
+    from loom_env.experts.handover import HandoverExpert
+
+    planners = {
+        s: SimpleNamespace(detach=lambda: None, profile=manipulation_profile(a))
+        for s, a in handover.deployment.arms.items()
+    }
+    sizes = np.array([0.04, 0.04, 0.04])
+    sizes[long_axis] = 0.30
+    com = np.zeros(3)
+    com[long_axis] = 0.025
+    axis = np.eye(3)[long_axis]
+    rotation, _ = Rotation.align_vectors([[0, 1, 0]], [axis])
+    state = world()
+    state["tea_pack/pose_world"][3:] = rotation.as_quat()
+    state["tea_pack/center_of_mass_local"] = com
+    for giver, receiver in [("left", "right"), ("right", "left")]:
+        cfg = replace(handover, arm_roles={"giver": giver, "receiver": receiver})
+        expert = HandoverExpert(cfg, planners, lambda: state)
+        expert.asset = replace(
+            expert.asset, bounds=tuple(map(tuple, [-sizes / 2, sizes / 2]))
+        )
+        expert.reset(None)
+        a, b = expert.sites[giver], expert.sites[receiver]
+        np.testing.assert_allclose((a + b) / 2, com, atol=1e-12)
+        np.testing.assert_allclose(np.linalg.norm(a - b), 0.10)
+        assert rotation.apply(a - b)[1] * (1 if giver == "left" else -1) > 0
+        assert np.all(np.abs(a) < sizes / 2)
+        assert np.all(np.abs(b) < sizes / 2)
+
+
+@pytest.mark.parametrize(
+    "size, message",
+    [((0.10, 0.04, 0.04), "too short"), ((0.30, 0.10, 0.10), "jaw opening")],
+)
+def test_automatic_grasps_reject_boxes_that_do_not_fit(handover, size, message):
+    from types import SimpleNamespace
+    from loom_env.embodiments.manipulation import manipulation_profile
+    from loom_env.experts.handover import HandoverExpert
+
+    state = world()
+    state["tea_pack/center_of_mass_local"] = np.zeros(3)
+    planners = {
+        s: SimpleNamespace(detach=lambda: None, profile=manipulation_profile(a))
+        for s, a in handover.deployment.arms.items()
+    }
+    expert = HandoverExpert(handover, planners, lambda: state)
+    size = np.asarray(size)
+    expert.asset = replace(
+        expert.asset, bounds=tuple(map(tuple, [-size / 2, size / 2]))
+    )
+    with pytest.raises(ValueError, match=message):
+        expert.reset(None)
+
+
+def test_automatic_grasps_keep_finger_margin_for_offset_com(handover):
+    from types import SimpleNamespace
+    from loom_env.embodiments.manipulation import manipulation_profile
+    from loom_env.experts.handover import HandoverExpert
+
+    state = world()
+    state["tea_pack/pose_world"][3:] = [0, 0, np.sqrt(0.5), np.sqrt(0.5)]
+    state["tea_pack/center_of_mass_local"] = np.array([0.15, 0, 0])
+    planners = {
+        s: SimpleNamespace(detach=lambda: None, profile=manipulation_profile(a))
+        for s, a in handover.deployment.arms.items()
+    }
+    expert = HandoverExpert(handover, planners, lambda: state)
+    expert.reset(None)
+    assert expert.sites["left"][0] == pytest.approx(expert.asset.bounds[1][0] - 0.011)
+    assert expert.sites["left"][0] - expert.sites["right"][0] == pytest.approx(0.1)
+    state["tea_pack/pose_world"][3:] = [0, np.sqrt(0.5), 0, np.sqrt(0.5)]
+    with pytest.raises(ValueError, match="horizontal"):
+        expert.reset(None)

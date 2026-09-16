@@ -31,11 +31,6 @@ class AssetDefinition:
     ) = None
     # Reviewed closed-Panda finger centre height above the supporting plane.
     push_height: float | None = None
-    # Object-local giver/receiver centres and local long axis for handover.
-    handover: tuple[tuple[float, float, float], tuple[float, float, float]] | None = (
-        None
-    )
-    handover_axis: tuple[float, float, float] | None = None
     source_scale: float = 1.0
     source_translation: tuple[float, float, float] = (0.0, 0.0, 0.0)
 
@@ -55,8 +50,6 @@ ASSETS = {
         ),
         dynamic=True,
         grasp=(0.12, 0.0, 0.0),
-        handover=((0.12, 0.0, 0.0), (-0.02, 0.0, 0.0)),
-        handover_axis=(1.0, 0.0, 0.0),
     ),
     "maniskill:table": AssetDefinition(
         "table",
