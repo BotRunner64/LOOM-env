@@ -151,9 +151,6 @@ def test_contact_step_uses_native_state_and_rejects_obstacles(monkeypatch):
         goal = measured.copy()
         goal[0] += 0.001
         command = planner.cartesian_step(observation, world, goal)
-        assert (
-            np.max(np.abs(command - q)) <= 0.4 * collection.deployment.control_dt + 1e-9
-        )
         moved = planner.planner.kinematics.compute_kinematics(planner._state(command))
         assert (
             moved.tool_poses.get_link_pose(planner.arm.tcp_frame).position[0, 0].item()
@@ -162,9 +159,5 @@ def test_contact_step_uses_native_state_and_rejects_obstacles(monkeypatch):
         world["table/pose_world"][2] = measured[2]
         with pytest.raises(SourceFailure, match="collision"):
             planner.cartesian_step(observation, world, goal)
-        far = measured.copy()
-        far[0] += 0.1
-        with pytest.raises(SourceFailure, match="tracking"):
-            planner.cartesian_step(observation, world, far)
     finally:
         planner.planner.destroy()

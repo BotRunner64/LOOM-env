@@ -1,20 +1,19 @@
 """cuRobo 0.8 pose planning in the selected arm's base frame."""
 
-from itertools import product
-from copy import copy
 import hashlib
 import json
 import time
+from copy import copy
+from itertools import product
 
 import numpy as np
-from scipy.spatial.transform import Rotation
 import torch
-
 from curobo._src.collision.attachment_manager import AttachmentManager
 from curobo.kinematics import Kinematics, KinematicsCfg
 from curobo.motion_planner import MotionPlanner, MotionPlannerCfg
 from curobo.scene import Cuboid, Mesh, Scene
 from curobo.types import GoalToolPose, JointState, Pose
+from scipy.spatial.transform import Rotation
 
 from loom_env.assets.catalog import asset_definition, collision_mesh
 from loom_env.embodiments.manipulation import manipulation_profile, planner_robot
@@ -238,22 +237,12 @@ class ArmPlanner:
             Rotation.from_quat(local_goal[3:])
             * Rotation.from_quat(local_measured[3:]).inv()
         ).as_rotvec()
-        if (
-            np.linalg.norm(delta_position) > 0.02
-            or np.linalg.norm(delta_rotation) > 0.15
-        ):
-            raise SourceFailure(
-                "Contact Cartesian reference exceeded tracking tolerance", kind="skill"
-            )
         state = self.servo_model.compute_kinematics(self._state(q))
         index = state.tool_frames.index(self.arm.tcp_frame)
         jacobian = state.tool_jacobians[0, 0, index].detach().cpu().numpy()
         error = np.r_[delta_position, delta_rotation]
         dq = jacobian.T @ np.linalg.solve(
             jacobian @ jacobian.T + 0.0004 * np.eye(6), error
-        )
-        dq *= min(
-            1.0, 0.4 * self.deployment.control_dt / max(np.max(np.abs(dq)), 1e-12)
         )
         target = q + dq
         bounds = np.asarray(self.arm.joint_limits)

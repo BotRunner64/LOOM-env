@@ -141,7 +141,7 @@ class PushExpert:
                 self.retreat_start = self.tcp_goal.copy()
                 self._change("retreat", events)
             else:
-                distance = min(0.02 * self.dt, remaining)
+                distance = min(0.08 * self.dt, remaining)
                 # Correct contact-induced sideways drift while keeping the flat
                 # pusher orientation fixed. Limit lateral speed to 5 mm/s.
                 lateral = error - remaining * self.direction
