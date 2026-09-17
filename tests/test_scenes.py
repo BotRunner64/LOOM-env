@@ -4,11 +4,11 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from loom_env.scenes.workspace import sample_objects
-from loom_env.specs.config import load_collection
 from loom_env.embodiments.contacts import opposing_contacts
 from loom_env.experts.pick_place import PickPlaceExpert
 from loom_env.runtime.runner import SourceFailure
+from loom_env.scenes.workspace import sample_objects
+from loom_env.specs.config import load_collection
 from loom_env.tasks import create_task
 
 
@@ -97,11 +97,14 @@ def test_close_command_alone_cannot_advance_expert(spec, frame_factory):
         spec.collection, UnusedPlanner(), lambda: frame.world_state
     )
     expert.reset(None)
-    expert.stage_index = expert.STAGES.index("close")
-    with pytest.raises(SourceFailure, match="close feedback timed out"):
+    from loom_env.experts.actions import CloseGripper
+
+    closing = CloseGripper()
+    expert.arm.update(frame.observation, frame.world_state)
+    with pytest.raises(SourceFailure, match="close timed out"):
         for _ in range(50):
-            expert.act(frame.observation)
-    assert expert.stage == "close"
+            closing.step(expert.arm)
+    assert not closing.done
 
 
 def test_contacts_without_lift_cannot_start_transfer(spec, frame_factory):
@@ -110,6 +113,9 @@ def test_contacts_without_lift_cannot_start_transfer(spec, frame_factory):
         spec.collection, UnusedPlanner(), lambda: frame.world_state
     )
     expert.reset(None)
-    expert.stage_index = expert.STAGES.index("transfer")
+    expert.arm.update(frame.observation, frame.world_state)
+    routine = expert.routine()
+    next(routine)  # Grasp.
+    next(routine)  # Lift. Simulate a controller completing without object lift.
     with pytest.raises(SourceFailure, match="not physically lifted"):
-        expert.act(frame.observation)
+        next(routine)

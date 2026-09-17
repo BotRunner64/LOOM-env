@@ -169,23 +169,19 @@ def test_thin_coin_grasp_still_requires_real_opposing_contacts():
 
 
 def test_preinsertion_goal_compensates_measured_coin_slip(insertion):
-    from types import SimpleNamespace
-
-    from loom_env.experts.insertion import InsertionExpert
+    from loom_env.assets.insertion import InsertionGeometry
+    from loom_env.experts.insertion import Insert
     from loom_env.specs.episode import Observation
 
     _, world = insertion
     collection = load_collection(ROOT / "configs/collection/insert_coin.yaml")
-    expert = InsertionExpert(
-        collection, SimpleNamespace(detach=lambda: None), lambda: world
-    )
-    expert.reset(None)
+    expert = Insert(InsertionGeometry(collection), collection.task.parameters["depth"])
     tcp = np.r_[world["coin/pose_world"][:3] + [0.0, 0.0, 0.12], [1.0, 0.0, 0.0, 0.0]]
     observation = Observation(0.0, {"robot/right/tcp_pose_world": tcp})
-    first = expert._insertion_goal(observation, world, -0.004)
+    first = expert.goal(observation, world, -0.004)
     slip = np.array([0.001, -0.002, 0.003])
     world["coin/pose_world"][:3] += slip
-    second = expert._insertion_goal(observation, world, -0.004)
+    second = expert.goal(observation, world, -0.004)
     # The physical coin is untouched; the commanded TCP compensates its measured slip.
     np.testing.assert_allclose(
         second[:3] - first[:3],
@@ -198,47 +194,43 @@ def test_preinsertion_goal_compensates_measured_coin_slip(insertion):
 
 
 def test_insertion_does_not_chase_coin_tilt(insertion):
-    from types import SimpleNamespace
-
-    from loom_env.experts.insertion import InsertionExpert
+    from loom_env.assets.insertion import InsertionGeometry
+    from loom_env.experts.insertion import Insert
     from loom_env.specs.episode import Observation
 
     _, world = insertion
     collection = load_collection(ROOT / "configs/collection/insert_coin.yaml")
-    expert = InsertionExpert(
-        collection, SimpleNamespace(detach=lambda: None), lambda: world
-    )
-    expert.reset(None)
+    expert = Insert(InsertionGeometry(collection), collection.task.parameters["depth"])
     tcp = np.r_[world["coin/pose_world"][:3] + [0, 0, 0.12], [1, 0, 0, 0]]
     observation = Observation(0.0, {"robot/right/tcp_pose_world": tcp})
-    expert.stage_index = expert.STAGES.index("align")
-    expert._insertion_goal(observation, world, -0.004)
-    expert.stage_index = expert.STAGES.index("insert")
-    first = expert._insertion_goal(observation, world, 0.012)
+    expert.goal(observation, world, -0.004)
+    first = expert.goal(observation, world, 0.012, hold_orientation=True)
     np.testing.assert_allclose(first[3:], tcp[3:], atol=1e-8)
     world["coin/pose_world"][3:] = (
         Rotation.from_euler("y", 5, degrees=True)
         * Rotation.from_quat(world["coin/pose_world"][3:])
     ).as_quat()
-    second = expert._insertion_goal(observation, world, 0.012)
+    second = expert.goal(observation, world, 0.012, hold_orientation=True)
     # Coin rotation alone must not induce TCP rotation or a pivot translation.
     np.testing.assert_allclose(second, first, atol=1e-8)
     moved_tcp = tcp.copy()
     moved_tcp[3:] = (
         Rotation.from_euler("y", 1, degrees=True) * Rotation.from_quat(tcp[3:])
     ).as_quat()
-    third = expert._insertion_goal(
-        Observation(0.05, {"robot/right/tcp_pose_world": moved_tcp}), world, 0.012
+    third = expert.goal(
+        Observation(0.05, {"robot/right/tcp_pose_world": moved_tcp}),
+        world,
+        0.012,
+        hold_orientation=True,
     )
     np.testing.assert_allclose(third[3:], first[3:], atol=1e-8)
-    expert.reset(None)
-    assert expert.insert_rotation is None
+    fresh = Insert(InsertionGeometry(collection), collection.task.parameters["depth"])
+    assert fresh.insert_rotation is None
 
 
 def test_insertion_accepts_readonly_world_poses(insertion):
-    from types import SimpleNamespace
-
-    from loom_env.experts.insertion import InsertionExpert
+    from loom_env.assets.insertion import InsertionGeometry
+    from loom_env.experts.insertion import Insert
     from loom_env.specs.episode import Observation
 
     task, world = insertion
@@ -248,34 +240,28 @@ def test_insertion_accepts_readonly_world_poses(insertion):
     assert task.metrics(world) == expected
     assert task.update(world, 0.05).outcome is None
     collection = load_collection(ROOT / "configs/collection/insert_coin.yaml")
-    expert = InsertionExpert(
-        collection, SimpleNamespace(detach=lambda: None), lambda: world
-    )
-    expert.reset(None)
+    expert = Insert(InsertionGeometry(collection), collection.task.parameters["depth"])
     tcp = np.r_[world["coin/pose_world"][:3] + [0, 0, 0.12], [1, 0, 0, 0]]
     observation = Observation(0.0, {"robot/right/tcp_pose_world": tcp})
-    assert np.isfinite(expert._insertion_goal(observation, world, -0.004)).all()
+    assert np.isfinite(expert.goal(observation, world, -0.004)).all()
 
 
 def test_insertion_features_support_new_asset_ids_and_local_frames(
     insertion, monkeypatch
 ):
-    from types import SimpleNamespace
-
     from loom_env.assets.catalog import ASSETS
-    from loom_env.experts.insertion import InsertionExpert
+    from loom_env.assets.insertion import InsertionGeometry
+    from loom_env.experts.insertion import Insert
     from loom_env.scenes.workspace import transform
     from loom_env.specs.episode import Observation
 
     original, world = insertion
     expected = original.metrics(world)
     collection = load_collection(ROOT / "configs/collection/insert_coin.yaml")
-    planner = SimpleNamespace(detach=lambda: None)
-    expert = InsertionExpert(collection, planner, lambda: world)
-    expert.reset(None)
+    expert = Insert(InsertionGeometry(collection), collection.task.parameters["depth"])
     tcp = np.array([0.4, -0.2, 0.9, 1, 0, 0, 0])
     observation = Observation(0, {"robot/right/tcp_pose_world": tcp})
-    expected_goal = expert._insertion_goal(observation, world, -0.004)
+    expected_goal = expert.goal(observation, world, -0.004)
     objects = plain(collection.scene.objects)
     # Relabel assets and rotate their local coordinate systems without changing
     # physical mating geometry. Neither task nor controller may know the old IDs.
@@ -303,9 +289,8 @@ def test_insertion_features_support_new_asset_ids_and_local_frames(
         world[f"{name}/pose_world"] = pose
     changed = replace(collection, scene=replace(collection.scene, objects=objects))
     task = create_task(changed)
-    expert = InsertionExpert(changed, planner, lambda: world)
-    expert.reset(None)
-    actual_goal = expert._insertion_goal(observation, world, -0.004)
+    expert = Insert(InsertionGeometry(changed), changed.task.parameters["depth"])
+    actual_goal = expert.goal(observation, world, -0.004)
     np.testing.assert_allclose(actual_goal[:3], expected_goal[:3], atol=1e-10)
     delta = (
         Rotation.from_quat(actual_goal[3:])
@@ -320,7 +305,8 @@ def test_insertion_features_support_new_asset_ids_and_local_frames(
 def test_shared_lift_extracts_along_fixture_frame(insertion):
     from types import SimpleNamespace
 
-    from loom_env.experts.pick_place import LiftExpert
+    from loom_env.experts.pick_place import LiftExpert, lift_from_support
+    from loom_env.scenes.workspace import workspace
     from loom_env.specs.episode import Observation
 
     _, world = insertion
@@ -341,8 +327,120 @@ def test_shared_lift_extracts_along_fixture_frame(insertion):
         lambda: world,
     )
     expert.reset(None)
-    expert.stage_index = expert.STAGES.index("lift")
     tcp = np.array([0.4, 0.2, 0.9, 1, 0, 0, 0])
-    expert._extract_step(Observation(0, {"robot/right/tcp_pose_world": tcp}))
+    arm = expert.arm
+    arm.update(
+        Observation(
+            0,
+            {
+                "robot/right/tcp_pose_world": tcp,
+                "robot/left/joint_position": np.array(
+                    collection.deployment.arms["left"].initial_positions
+                ),
+            },
+        ),
+        world,
+    )
+    action = lift_from_support(arm, workspace(collection.scene)[0])
+    action.step(arm)
     np.testing.assert_allclose(goals[0][0][:3] - tcp[:3], [0.001, 0, 0], atol=1e-12)
     assert goals[0][1]["contact_objects"] == ("source_slot",)
+
+
+def test_existing_held_part_skips_grasp_and_extraction(insertion):
+    from types import SimpleNamespace
+
+    from loom_env.experts.actions import Grasp, MoveHeld
+    from loom_env.experts.insertion import InsertionExpert
+    from loom_env.specs.episode import Observation
+
+    _, world = insertion
+    collection = load_collection(ROOT / "configs/collection/insert_coin.yaml")
+    world["coin/grasped_by"][1] = True
+    world["coin/pose_world"][2] += 0.08
+    attached = []
+    planner = SimpleNamespace(
+        attached=False,
+        detach=lambda: None,
+        attach=lambda *args, **kwargs: attached.append(True),
+    )
+    expert = InsertionExpert(collection, planner, lambda: world)
+    expert.reset(None)
+    arm = expert.arm
+    observation = Observation(
+        0,
+        {
+            "robot/left/joint_position": np.array(
+                collection.deployment.arms["left"].initial_positions
+            ),
+            "robot/right/joint_position": np.array(
+                collection.deployment.arms["right"].initial_positions
+            ),
+            "robot/right/tcp_pose_world": np.r_[
+                world["coin/pose_world"][:3] + [0, 0, 0.12], [1, 0, 0, 0]
+            ],
+        },
+    )
+    arm.update(observation, world)
+    routine = expert.routine()
+    grasp = next(routine)
+    assert isinstance(grasp, Grasp)
+    assert grasp.step(arm)  # No planner.plan exists; no approach is attempted.
+    transfer = next(routine)
+    assert isinstance(transfer, MoveHeld)  # No extraction action was requested.
+    planner.plan = lambda observation, *_args, **_kwargs: (
+        np.array([observation.values["robot/right/joint_position"]]),
+        {},
+    )
+    transfer.step(arm)
+    assert attached == [True]
+
+
+def test_insert_action_starts_with_held_part_at_entry(insertion):
+    from types import SimpleNamespace
+
+    from loom_env.experts.actions import Manipulator
+    from loom_env.experts.insertion import Insert
+    from loom_env.specs.episode import Observation
+
+    task, world = insertion
+    collection = load_collection(ROOT / "configs/collection/insert_coin.yaml")
+    world["coin/grasped_by"][1] = True
+    at_depth(task, world, -0.004)
+    calls = []
+
+    def cartesian(observation, truth, goal, **kwargs):
+        calls.append(goal.copy())
+        return np.array(collection.deployment.arms["right"].initial_positions)
+
+    arm = Manipulator(
+        collection.deployment,
+        collection.scene,
+        "right",
+        "coin",
+        SimpleNamespace(
+            attached=False,
+            attach=lambda *args, **kwargs: None,
+            cartesian_step=cartesian,
+        ),
+    )
+    observation = Observation(
+        0,
+        {
+            "robot/left/joint_position": np.array(
+                collection.deployment.arms["left"].initial_positions
+            ),
+            "robot/right/joint_position": np.array(
+                collection.deployment.arms["right"].initial_positions
+            ),
+            "robot/right/tcp_pose_world": np.r_[
+                world["coin/pose_world"][:3] + [0, 0, 0.12], [1, 0, 0, 0]
+            ],
+        },
+    )
+    action = Insert(task.geometry, task.parameters["depth"])
+    for _ in range(4):
+        arm.update(observation, world)
+        action.step(arm)
+    assert not action.align
+    assert calls  # Insertion motion began without grasp/extraction/transfer.

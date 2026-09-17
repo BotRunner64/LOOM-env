@@ -744,7 +744,7 @@ python scripts/replay_episode.py outputs/laptop-variants/episodes/close-01 \
 
 ## Expert 能力边界重构
 
-本轮去掉按硬币资产 ID 选择子类的分派，保留七种能力 expert。`CoinLiftExpert` 删除，夹具抽出成为 Lift／PickPlace／Insertion 共用的 `GraspTransport` 流程；退出方向取初始夹具入口坐标系的 +Z，不再写死世界 Z。已有自由物体抓放继续用原有规划路径。当前抽出距离 125 mm、速度 20 mm/s 是控制策略，仍需对新的夹具行程检验可达性，不代表任意夹具可直接成功。
+第一轮去掉按硬币资产 ID 选择子类的分派，保留七个完整示范入口。`CoinLiftExpert` 删除；当时共用的完整抓放状态机现已被[独立反馈动作](#共享动作重构)替代。夹具抽出由 Lift／PickPlace／Insertion 共用；退出方向取初始夹具入口坐标系的 +Z，不再写死世界 Z。已有自由物体抓放继续用原有规划路径。当前抽出距离 125 mm、速度 20 mm/s 是控制策略，仍需对新的夹具行程检验可达性，不代表任意夹具可直接成功。
 
 `InsertionExpert` 读取 `InsertionBody` 和 `InsertionSocket` 标注，专家与 `InsertionTask` 共用 `InsertionGeometry`。现有硬币标注圆柱中心、轴、半径、半厚度；槽标注入口坐标系（+Z 向外、Y 为配合面法向、X 为槽长方向）。槽的 `footprint` 仅标识允许的目标占位范围，沿用已验收的支架范围，不能把它当作孔尺寸或替代 USD 碰撞。圆柱允许绕自身轴旋转和法向反转；没有实现任意多边形配合、螺纹、受力搜索。新增资产应按真实配合特征标注，不能再从外包围盒猜入口。
 
@@ -796,3 +796,53 @@ python scripts/replay_episode.py outputs/expert-refactor/episodes/close-01 \
 SpringButton 仍是候选资产，没有接入任务。源 USD 的密度可供 PhysX 推导质量，因此缺少显式质量不等于文件损坏；但项目要求物理属性在接入前明确。源 `SpringButton/00002` 的 `E_button_01_13/Cylinder` 碰撞启用而没有物理材质绑定，不能确认作者是否有意依赖默认值。补绑同资产现有材料并固化推导质量的方案尚待确认；本轮没有修改按钮物理属性，也没有新增物体专用 expert。
 
 半合盖物理重放 `replay/close-01-replay-comparison.json` 通过：171 帧机器人关节、TCP、物体关节及 link 位姿的最大数值误差均为 0，结束结果一致。完整测试含 CUDA 共 256 项通过（`tests-gpu.log`）；修改的 Python 文件通过 Ruff E9/F 检查，`git diff --check` 通过。数值重放一致性仅对应本机这次记录。
+
+
+## 共享动作重构
+
+本轮仅迁移 Lift、PickPlace、Insertion，删除 `GraspTransport` 及依赖 `STAGES`／`stage_index` 的继承。现有任务的目标、成功判据、资产物理属性均未修改；其他 expert 暂未迁移。
+
+完整流程在 `experts/pick_place.py`、`experts/insertion.py` 的 `routine()` 中安排动作。共享动作在 `experts/actions.py`，独立插入控制 `Insert` 在 `experts/insertion.py`。例如 PickPlace 使用如下普通 Python 顺序：
+
+```python
+yield Grasp(contact_objects=initial_contacts(arm))
+yield lift_from_support(arm, support)
+# 实测已抬升后开始搬运；MoveHeld 准备规划用包络。
+yield MoveHeld(transfer_goal)
+yield MoveHeld(lower_goal)
+yield Release()
+yield Move(retreat_goal)
+```
+
+完整源码保留了实际抬升核对及动态目标计算；持物动作自行准备所需规划包络；上面仅展示调用顺序。不能把规划器的 attach 当作物理抓持。
+
+每个动作保存自己的进度，`step(arm)` 返回完成或抛出失败，不推进其他动作，也不宣布任务成功。`Manipulator` 不持有流程；它保存角色已经解析好的机器人、目标、当前观测和命令。每个物理控制周期调用一次 `arm.update(observation, world)`，随后推进动作并将 `arm.command` 交给环境。计时、接触采样计数和事件步号由此同步；不能在同一物理帧上循环调用直到完成。
+
+`Grasp` 发现已被指定手真实抓持时直接完成，不重新张开或规划接近；`MoveHeld`、`Extract`、`Insert` 要求开始时已抓持，并监测后续抓持丢失。`Release` 使用实测抓持消失确认释放，不能把张开命令当作释放证据。`MoveHeld` 和 `Insert` 在需要时自行附加规划包络，不要求调用者先运行另一段 expert；贴近支撑面的初始抬升显式使用 `attach=False`，保持原有接触规划方式。动作对象为一次执行所有，重新执行创建新实例；expert 的 `reset()` 会重新创建整段流程，避免上个回合状态残留。
+
+完整插入流程仍服务现有“从源槽取出并插回目标槽”任务，但准备动作不再绑定在 `Insert` 内：已经持有且离开源槽时跳过接近／抽出，按当前测量计算转移目标，再执行插入。`Insert` 自身也可以从入口附近开始。任务所要求的历史过程仍由任务检查器判断；动作能够继续执行不意味着任意初态都满足原任务定义。
+
+### 复现与检查
+
+工作目录为仓库根目录，激活 `loom-env`，按 [environment.md](environment.md) 配好 EULA、GPU 和 Vulkan。沿用上一轮已准备的桌子、Panda、积木／篮子、硬币／固定槽，不用重新准备资产。本轮采集在沙箱外运行：
+
+```bash
+python scripts/collect.py --collection configs/collection/pick_place.yaml \
+  --output-dir outputs/action-refactor --episode-id place-01
+python scripts/collect.py --collection configs/collection/lift_coin.yaml \
+  --output-dir outputs/action-refactor --episode-id lift-01
+python scripts/collect.py --collection configs/collection/insert_coin.yaml \
+  --output-dir outputs/action-refactor --episode-id insert-01
+python scripts/inspect_data.py episode outputs/action-refactor/episodes/insert-01
+python scripts/replay_episode.py outputs/action-refactor/episodes/insert-01 \
+  --output-dir outputs/action-refactor/replay
+python -m pytest -q
+```
+
+重复运行需更换回合 ID。采集打印 `RESULT` 及产物路径，预期 `outcome.code=success`；视频位于 `videos/<id>.mp4`，原始相机位于 `episodes/<id>/cameras/`。重放报告预期 `passed: true`。日志使用 `action=...`，定位失败时查看动作事件及 `SourceFailure`：缺少初始抓持、持续丢失接触、规划未到位和插入停滞分别报告，不再依赖专家内部阶段编号排查。
+
+本机 seed 0 的普通抓放 `place-01` 205 步成功、硬币抬升 `lift-01` 259 步成功、插入 `insert-01` 500 步成功。前两项与上一轮相同；插入由 508 步变为 500 步，动作完成后现在可以在同一控制周期切换，不再保留旧阶段之间的额外等待。动作的速度、抓持稳定采样要求和任务成功阈值没有调整；物理细节仍以本轮轨迹为准，不能把步数减少解释为新的速度优化。
+
+独立动作测试在 `tests/test_expert_actions.py`、`tests/test_insertion.py`：已有抓持直接执行运动或入口插入、不重新接近／张开；缺少或失去真实抓持时失败；释放必须等待反馈；完整插入流程能跳过已经完成的抓取／抽出。原有几何、只读状态、抓持滑移和防倾倒假成功检查继续保留。这些测试验证接口可组合，物理效果由上述回合及视频验收。
+
+最终版本确认回合为 `place-02`（205 步）和 `insert-02`（500 步）；与初轮对应回合逐帧动作及目标物体位姿分量差均为 0。`insert-02-report.json` 的离线重算确认成功，终点深度 15.771 mm、手指接触力为 0。重放 `insert-01` 通过 501 帧比较，最大硬币位置差 0.483 mm、姿态差 0.0611 rad，结果一致但不是数值完全相同；报告位于 `replay/insert-01-replay-comparison.json`。完整 CUDA 测试 264 项通过；最后补充的已有抓持姿态保留分支及相关 59 项测试通过。修改文件 Ruff 检查与 `git diff --check` 通过。完整汇总为 `outputs/action-refactor/summary.json`。
