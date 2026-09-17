@@ -1,17 +1,17 @@
 """Explicit assembly shared by collection, replay, and physical validation."""
 
-from loom_env.experts.articulation import LaptopHingeExpert
+from loom_env.experts.articulation import ArticulationExpert
 from loom_env.experts.handover import HandoverExpert
-from loom_env.experts.insertion import CoinInsertionExpert, CoinLiftExpert
+from loom_env.experts.insertion import InsertionExpert
 from loom_env.experts.pick_place import LiftExpert, PickPlaceExpert
 from loom_env.experts.push import PushExpert
 from loom_env.experts.sweep import SweepExpert
 from loom_env.tasks import create_task
 
 EXPERTS = {
-    "open_laptop": LaptopHingeExpert,
-    "close_laptop_partway": LaptopHingeExpert,
-    "insert_coin": CoinInsertionExpert,
+    "open_laptop": ArticulationExpert,
+    "close_laptop_partway": ArticulationExpert,
+    "insert_coin": InsertionExpert,
     "put_object_in_container": PickPlaceExpert,
     "lift_object": LiftExpert,
     "push_object": PushExpert,
@@ -36,12 +36,6 @@ def create_expert(collection, environment, asset_root):
         factory = EXPERTS[collection.task.id]
     except KeyError as error:
         raise ValueError(f"No expert for task: {collection.task.id}") from error
-    if (
-        factory is LiftExpert
-        and collection.scene.objects[collection.role_bindings["target_object"]]["asset"]
-        == "robodojo:coin"
-    ):
-        factory = CoinLiftExpert
     planners = {}
     try:
         sides = (

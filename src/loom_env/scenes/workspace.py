@@ -53,7 +53,7 @@ def workspace(scene):
                 np.isfinite(v) for v in values.values()
             ):
                 raise ValueError(
-                    "Articulated object needs its named initial joint position in radians"
+                    "Articulated object needs its named initial joint position (revolute: radians; prismatic: metres)"
                 )
         elif "joint_positions" in obj:
             raise ValueError("Rigid object cannot have joint positions")

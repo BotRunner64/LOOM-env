@@ -56,4 +56,8 @@ flowchart LR
 
 命令入口在 `scripts/`，依赖在 `pyproject.toml`。随[任务与场景拓展](expansion-plan.md)按具体案例检查组装入口的角色假设和部署与本体定义的重复；进度统一见 [README](../README.md#当前进度)。
 
-固定底座笔记本的开盖和半合盖复用 `LaptopHingeExpert` 与 `LaptopHingeTask`：目标角来自任务参数，初始关节角来自场景，任务检查运动方向、真实抓持历史与最终释放。两种指令对应同一套接近、抓持、铰链圆弧运动和释放流程，未增加通用动作流程语言。运行与证据见[关节变体](implementation.md#开盖与半合盖变体)。
+Expert 按交互能力划分：`LiftExpert`、`PickPlaceExpert`、`InsertionExpert`、`ArticulationExpert`、`PushExpert`、`HandoverExpert`、`SweepExpert`。具体任务可以绑定同一个 expert；`runtime/build.py` 不按物体资产 ID 特殊分派。抓取、夹具抽出及搬运的公共实现为 `GraspTransport`，它不注册为 expert；Lift、PickPlace、Insertion 复用它，互相没有物体专用继承链。
+
+资产目录只标注交互几何：抓取点及可选局部朝向、圆柱配合特征、槽入口坐标系、活动 link 的接触坐标系。质量、材质、碰撞和关节仍只来自 USD。任务配置负责目标、方向、容差及接触点选择；专家负责接近、接触建立、约束运动和释放；任务判据独立读取测量历史。插入控制与判据共用 `assets/insertion.py` 的几何计算，专家不实例化任务检查器。
+
+开盖与半合盖共用 `ArticulationExpert` 和 `ArticulationTask`。关节运动取 USD 的类型、轴、父坐标系和限位；旋转用弧度，滑动用米。当前控制流程为抓持后运动并释放，仍限定 Panda、固定底座、两个 link 和一个活动关节。插入目前支持圆片状圆柱与槽，不能把接口泛化当作任意插销／螺纹插入已经验证。真实仿真覆盖范围、命令及证据集中在[能力边界重构](implementation.md#expert-能力边界重构)。

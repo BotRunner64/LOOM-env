@@ -4,6 +4,8 @@ roles:
   target_object: articulated_object
 required_capabilities: [grasp]
 parameters:
-  target_angle: -1.6580627893946132
-  angle_tolerance: 0.2617993877991494
+  target_position: -1.6580627893946132
+  position_tolerance: 0.2617993877991494
   hold_time: 0.3
+  direction: -1
+  contact_index: 1

@@ -78,7 +78,14 @@ class ReplayComparison:
             )
         for key, actual in frame.world_state.items():
             if "/joints/" in key and key.endswith("/position"):
-                errors[f"{key}_rad"] = float(np.max(np.abs(actual - truth[key])))
+                name = key.split("/")[0]
+                asset_id = self.episode.spec.collection.scene.objects[name]["asset"]
+                joint = self.episode.spec.provenance["scene_assets"][asset_id][
+                    "physics_properties"
+                ]["joint"]
+                errors[f"{key}_{joint['unit']}"] = float(
+                    np.max(np.abs(actual - truth[key]))
+                )
             elif "/links/" in key and key.endswith("/pose_world"):
                 errors[f"{key}_m"] = float(np.linalg.norm(actual[:3] - truth[key][:3]))
                 errors[f"{key}_rad"] = float(

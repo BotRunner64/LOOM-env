@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 from scipy.spatial.transform import Rotation
 
-from loom_env.experts.articulation import hinge_step
+from loom_env.experts.articulation import joint_step
 from loom_env.specs.config import load_collection
 from loom_env.tasks import create_task
 
@@ -10,7 +10,7 @@ from loom_env.tasks import create_task
 def test_hinge_step_preserves_radius_and_rotates_gripper_frame():
     body = np.array([2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0])
     hinge = np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0])
-    result = hinge_step(body, hinge, [0, 0, 1], np.pi / 2)
+    result = joint_step(body, hinge, [0, 0, 1], np.pi / 2, "revolute")
     np.testing.assert_allclose(result[:3], [1, 1, 0], atol=1e-12)
     np.testing.assert_allclose(
         Rotation.from_quat(result[3:]).apply([1, 0, 0]), [0, 1, 0], atol=1e-12
@@ -25,7 +25,7 @@ def test_hinge_target_requires_contact_history_and_release(collection, initial):
     task = create_task(load_collection(f"configs/collection/{collection}.yaml"))
     world = {task.q_key: np.array(initial), task.force_key: np.zeros((2, 2, 3))}
     task.reset(world)
-    world[task.q_key] = np.array(task.parameters["target_angle"])
+    world[task.q_key] = np.array(task.parameters["target_position"])
     for _ in range(10):
         assert task.update(world, 0.05).outcome is None
     world[task.force_key][task.side] = [[0, 2, 0], [0, -2, 0]]
@@ -39,7 +39,8 @@ def test_hinge_target_requires_contact_history_and_release(collection, initial):
         task.reset(world)
 
 
-def test_usd_hinge_preparation_exports_link_local_collisions(tmp_path):
+@pytest.mark.parametrize("joint_type", ["revolute", "prismatic"])
+def test_usd_hinge_preparation_exports_link_local_collisions(tmp_path, joint_type):
     from pxr import Usd, UsdGeom, UsdPhysics, UsdShade
 
     from loom_env.assets.articulation import describe
@@ -65,7 +66,12 @@ def test_usd_hinge_preparation_exports_link_local_collisions(tmp_path):
         UsdShade.MaterialBindingAPI.Apply(body.GetPrim()).Bind(
             material, materialPurpose="physics"
         )
-    hinge = UsdPhysics.RevoluteJoint.Define(stage, "/Asset/" + asset.joint)
+    schema = (
+        UsdPhysics.RevoluteJoint
+        if joint_type == "revolute"
+        else UsdPhysics.PrismaticJoint
+    )
+    hinge = schema.Define(stage, "/Asset/" + asset.joint)
     hinge.CreateBody0Rel().SetTargets(["/Asset/" + asset.root_body])
     hinge.CreateBody1Rel().SetTargets(["/Asset/" + asset.moving_body])
     hinge.CreateLowerLimitAttr(-110)
@@ -73,7 +79,11 @@ def test_usd_hinge_preparation_exports_link_local_collisions(tmp_path):
     fixed = UsdPhysics.FixedJoint.Define(stage, "/Asset/FixedBase")
     fixed.CreateBody1Rel().SetTargets(["/Asset/" + asset.root_body])
     report = describe(stage, asset, tmp_path)
-    np.testing.assert_allclose(report["joint"]["limits_rad"], np.deg2rad([-110, 0]))
+    np.testing.assert_allclose(
+        report["joint"]["limits"],
+        np.deg2rad([-110, 0]) if joint_type == "revolute" else [-110, 0],
+    )
+    assert report["joint"]["unit"] == ("rad" if joint_type == "revolute" else "m")
     np.testing.assert_allclose(
         report["bodies"][asset.root_body]["pose_asset"][:3], [1, 0, 0]
     )
@@ -93,3 +103,55 @@ def test_hinge_task_rejects_reversed_instruction(collection, wrong_initial):
     task = create_task(load_collection(f"configs/collection/{collection}.yaml"))
     with pytest.raises(ValueError, match="direction"):
         task.reset({task.q_key: np.array(wrong_initial)})
+
+
+def test_prismatic_motion_uses_world_joint_axis_and_preserves_orientation():
+    frame = np.r_[[0.4, 0.3, 0.2], Rotation.from_euler("y", 90, degrees=True).as_quat()]
+    tcp = np.r_[[0.1, 0.2, 0.3], Rotation.from_euler("z", 0.5).as_quat()]
+    moved = joint_step(tcp, frame, [0, 0, 1], -0.025, "prismatic")
+    np.testing.assert_allclose(moved[:3], tcp[:3] + [-0.025, 0, 0])
+    np.testing.assert_allclose(moved[3:], tcp[3:])
+
+
+def test_contact_frame_is_link_local_and_independent_of_task_name(monkeypatch):
+    from dataclasses import replace
+    from types import SimpleNamespace
+
+    from loom_env.assets.catalog import ASSETS
+    from loom_env.experts.articulation import ArticulationExpert
+    from loom_env.scenes.workspace import transform
+
+    collection = load_collection("configs/collection/open_laptop.yaml")
+    contact = (0.03, 0.04, 0.05, 0, 0, 0, 1)
+    monkeypatch.setitem(
+        ASSETS,
+        "test:hinged_panel",
+        replace(ASSETS["robodojo:laptop_fixed"], contact_poses=(contact,)),
+    )
+    objects = {
+        **collection.scene.objects,
+        "laptop": {**collection.scene.objects["laptop"], "asset": "test:hinged_panel"},
+    }
+    collection = replace(
+        collection,
+        scene=replace(collection.scene, objects=objects),
+        task=replace(
+            collection.task,
+            id="move_panel",
+            parameters={**collection.task.parameters, "contact_index": 0},
+        ),
+    )
+    monkeypatch.setattr(
+        "loom_env.experts.articulation.load_prepared",
+        lambda *_: {
+            "physics_properties": {"joint": {"type": "revolute", "limits": [-3, 3]}}
+        },
+    )
+    planner = SimpleNamespace(
+        asset_root=None, profile=SimpleNamespace(tcp_to_grasp=[0, 0, 0.1])
+    )
+    expert = ArticulationExpert(collection, planner, dict)
+    body = np.r_[[0.2, 0.3, 0.4], Rotation.from_euler("y", 90, degrees=True).as_quat()]
+    expected = transform(body, contact)
+    expected[:3] -= Rotation.from_quat(expected[3:]).apply([0, 0, 0.165])
+    np.testing.assert_allclose(expert._tcp(body, 0.065), expected)

@@ -3,17 +3,17 @@
 import numpy as np
 from scipy.spatial.transform import Rotation
 
+from loom_env.assets.catalog import asset_definition
 from loom_env.embodiments.commands import initial_command
 from loom_env.embodiments.manipulation import manipulation_profile
-from loom_env.assets.catalog import asset_definition
-from loom_env.scenes.workspace import transform, workspace
 from loom_env.runtime.runner import SourceFailure
+from loom_env.scenes.workspace import transform, workspace
 from loom_env.specs.config import ARMS
 from loom_env.specs.episode import Action, Event
 
 
-class LiftExpert:
-    STAGES = ("approach", "descend", "close", "lift", "wait")
+class GraspTransport:
+    """Shared grasp, optional fixture extraction, and transport mechanics."""
 
     def __init__(self, collection, planner, world_state):
         self.collection, self.planner, self.world_state = (
@@ -35,6 +35,16 @@ class LiftExpert:
         self.asset = asset_definition(collection.scene.objects[self.obj]["asset"])
         if self.asset.grasp is None:
             raise ValueError("Expert requires a reviewed grasp annotation")
+        self.fixture = collection.scene.objects[self.obj].get("initial_fixture")
+        self.socket = (
+            asset_definition(
+                collection.scene.objects[self.fixture]["asset"]
+            ).insertion_socket
+            if self.fixture
+            else None
+        )
+        if self.fixture and self.socket is None:
+            raise ValueError("Fixture extraction requires an annotated exit frame")
         self.support, _ = workspace(collection.scene)
         self.dt = collection.deployment.control_dt
 
@@ -48,6 +58,12 @@ class LiftExpert:
         ) = self.lost_contact = 0
         self.path = None
         self.started = False
+        self.lift_goal = None
+        if self.asset.grasp_rotation is not None:
+            pose = self.world_state()[f"{self.obj}/pose_world"]
+            self.tool_rotation = Rotation.from_quat(
+                pose[3:].copy()
+            ) * Rotation.from_quat(self.asset.grasp_rotation)
         self.planner.detach()
 
     @property
@@ -84,6 +100,48 @@ class LiftExpert:
         self.path = None
         self.started = False
 
+    def _extract_step(self, observation):
+        world, events = self.world_state(), []
+        speed = 0.02
+        held = bool(world[f"{self.obj}/grasped_by"][0 if self.side == "left" else 1])
+        self.lost_contact = 0 if held else self.lost_contact + 1
+        if self.lost_contact >= 5:
+            raise SourceFailure("Object slipped during slow extraction", kind="skill")
+        tcp = observation.values[f"robot/{self.side}/tcp_pose_world"]
+        if self.lift_goal is None:
+            self.lift_goal = tcp.copy()
+            fixture_pose = world[f"{self.fixture}/pose_world"]
+            frame = transform(fixture_pose, self.socket.pose)
+            self.extraction_axis = Rotation.from_quat(frame[3:].copy()).apply([0, 0, 1])
+            self.extraction_origin = tcp[:3].copy()
+            self.lift_reference = 0.0
+            self.lift_goal[:3] += self.extraction_axis * 0.125
+            self.started = True
+            events.append(Event("skill", "extraction", self.step, {"speed_m_s": speed}))
+        progress = float((tcp[:3] - self.extraction_origin) @ self.extraction_axis)
+        remaining = 0.125 - progress
+        if remaining < 0.001:
+            self._advance(events)
+        else:
+            goal = self.lift_goal.copy()
+            self.lift_reference = min(
+                0.125, self.lift_reference + speed * self.dt, progress + 0.003
+            )
+            goal[:3] = (
+                self.extraction_origin + self.extraction_axis * self.lift_reference
+            )
+            self.command[self.arm_slice] = self.planner.cartesian_step(
+                observation,
+                world,
+                goal,
+                contact_objects=(self.fixture,),
+            )
+        if self.stage_steps * self.dt > 20:
+            raise SourceFailure("Constrained extraction timed out", kind="skill")
+        self.stage_steps += 1
+        self.step += 1
+        return Action(self.command.copy(), tuple(events))
+
     def act(self, observation):
         truth = self.world_state()
         events = []
@@ -101,6 +159,9 @@ class LiftExpert:
         ):
             raise SourceFailure("Holding arm moved outside tolerance", kind="skill")
         while True:
+            if self.stage == "lift" and self.fixture:
+                action = self._extract_step(observation)
+                return Action(action.values, tuple(events) + action.events)
             if not self.started:
                 events.append(
                     Event(
@@ -129,6 +190,9 @@ class LiftExpert:
                         truth,
                         self._goal(truth, observation),
                         allow_object_contact=self.stage in {"descend", "lift"},
+                        contact_objects=(self.fixture,)
+                        if self.fixture and self.stage in {"descend", "lift"}
+                        else (),
                     )
                     events.append(Event("planning", self.stage, self.step, detail))
             if self.stage == "wait":
@@ -177,7 +241,11 @@ class LiftExpert:
         return Action(self.command.copy(), tuple(events))
 
 
-class PickPlaceExpert(LiftExpert):
+class LiftExpert(GraspTransport):
+    STAGES = ("approach", "descend", "close", "lift", "wait")
+
+
+class PickPlaceExpert(GraspTransport):
     STAGES = (
         "approach",
         "descend",

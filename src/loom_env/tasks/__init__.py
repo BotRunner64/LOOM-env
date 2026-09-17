@@ -1,8 +1,8 @@
 """Explicit task factories; no simulator or expert dependency."""
 
-from .articulation import LaptopHingeTask
+from .articulation import ArticulationTask
 from .handover import HandoverTask
-from .insertion import CoinInsertionTask
+from .insertion import InsertionTask
 from .lift import LiftTask
 from .place import PlaceTask
 from .push import PushTask
@@ -10,9 +10,9 @@ from .push_region import PushIntoRegionTask
 from .sweep import SweepTask
 
 TASKS = {
-    "open_laptop": LaptopHingeTask,
-    "close_laptop_partway": LaptopHingeTask,
-    "insert_coin": CoinInsertionTask,
+    "open_laptop": ArticulationTask,
+    "close_laptop_partway": ArticulationTask,
+    "insert_coin": InsertionTask,
     "put_object_in_container": PlaceTask,
     "lift_object": LiftTask,
     "push_object": PushTask,

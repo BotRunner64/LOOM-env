@@ -7,7 +7,26 @@ from pathlib import Path
 
 import numpy as np
 
-PREPARATION_VERSION = 3
+PREPARATION_VERSION = 4
+
+
+@dataclass(frozen=True)
+class InsertionBody:
+    """Circular cylinder envelope; axial spin and normal reversal are symmetric."""
+
+    center: tuple[float, float, float]
+    axis: tuple[float, float, float]
+    radius: float
+    half_thickness: float
+
+
+@dataclass(frozen=True)
+class InsertionSocket:
+    """Entry frame: +Z points out, Y is the mating normal, X runs along the slot."""
+
+    pose: tuple[float, float, float, float, float, float, float]
+    # Acceptance footprint, not hole dimensions or a collision substitute.
+    footprint: tuple[float, float]
 
 
 @dataclass(frozen=True)
@@ -22,6 +41,10 @@ class AssetDefinition:
     dynamic: bool = False
     # Object-local grasp centre; TCP offset belongs to the embodiment.
     grasp: tuple[float, float, float] | None = None
+    # Optional object-local orientation of the grasp frame (XYZW).
+    grasp_rotation: tuple[float, float, float, float] | None = None
+    insertion_body: InsertionBody | None = None
+    insertion_socket: InsertionSocket | None = None
     # Conservative, manually checked free interior: centre and full extents.
     interior: tuple[tuple[float, float, float], tuple[float, float, float]] | None = (
         None
@@ -40,7 +63,8 @@ class ArticulatedAssetDefinition(AssetDefinition):
     root_body: str
     moving_body: str
     joint: str
-    contact: tuple[float, float, float]
+    # Moving-link-local grasp frames, selected explicitly by the task.
+    contact_poses: tuple[tuple[float, float, float, float, float, float, float], ...]
 
 
 def is_articulated(asset):
@@ -61,7 +85,10 @@ ASSETS = {
         root_body="E_body_1",
         moving_body="E_displayer_5",
         joint="RevoluteJoint_computer_9_up",
-        contact=(0.069, 0.0, 0.113),
+        contact_poses=(
+            (0.069, 0.0, 0.113, 1, 0, 0, 0),
+            (0.069, 0.0, 0.113, 0, 1, 0, 0),
+        ),
     ),
     "robodojo:coin": AssetDefinition(
         "coin",
@@ -73,6 +100,13 @@ ASSETS = {
         ((-0.01425, -0.01425, 0), (0.01425, 0.01425, 0.00194075)),
         dynamic=True,
         grasp=(-0.013, 0, 0.000970375),
+        grasp_rotation=(0.5, 0.5, 0.5, 0.5),
+        insertion_body=InsertionBody(
+            center=(0, 0, 0.000970375),
+            axis=(0, 0, 1),
+            radius=0.01425,
+            half_thickness=0.000970375,
+        ),
     ),
     "robodojo:coin_slot": AssetDefinition(
         "coin_slot",
@@ -84,6 +118,10 @@ ASSETS = {
         ((-0.01606594, -0.00554018, -0.00856527), (0.01603406, 0.00556828, 0.00853472)),
         dynamic=False,
         grasp=None,
+        insertion_socket=InsertionSocket(
+            pose=(-0.00001594, 0.00001405, 0.00853472, 0, 0, 0, 1),
+            footprint=(0.01605, 0.00555423),
+        ),
     ),
     "robodojo:mouse": AssetDefinition(
         "mouse",

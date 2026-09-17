@@ -18,7 +18,7 @@ def instance_config(obj, prim_path, world_pose, asset_root):
         from loom_env.scenes.workspace import transform
 
         physics = load_prepared(asset_root, obj["asset"])["physics_properties"]
-        limits = physics["joint"]["limits_rad"]
+        limits = physics["joint"]["limits"]
         q = obj["joint_positions"][definition.joint]
         if not limits[0] <= q <= limits[1]:
             raise ValueError("Initial object joint position exceeds USD limits")

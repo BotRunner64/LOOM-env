@@ -26,15 +26,12 @@ def insertion():
 
 
 def at_depth(task, world, depth):
-    fixture = world[f"{task.target}/pose_world"]
+    fixture = task.geometry.frame(world, task.geometry.target)
     frame = Rotation.from_quat(fixture[3:])
     orientation = frame * Rotation.from_euler("x", 90, degrees=True)
-    center = (
-        frame.apply([*task.slot_center, task.slot_top + task.radius - depth])
-        + fixture[:3]
-    )
+    center = frame.apply([0, 0, task.geometry.body.radius - depth]) + fixture[:3]
     world["coin/pose_world"] = np.r_[
-        center - orientation.apply(task.center), orientation.as_quat()
+        center - orientation.apply(task.geometry.body.center), orientation.as_quat()
     ]
 
 
@@ -80,7 +77,7 @@ def test_incorrect_placement_rejected(insertion, kind):
     task, world = insertion
     approach_and_insert(task, world)
     world["coin/grasped_by"][:] = False
-    frame = Rotation.from_quat(world[f"{task.target}/pose_world"][3:])
+    frame = Rotation.from_quat(world[f"{task.geometry.target}/pose_world"][3:])
     if kind == "across":
         world["coin/pose_world"][:3] += frame.apply([0, 0.02, 0])
     elif kind == "along":
@@ -91,8 +88,8 @@ def test_incorrect_placement_rejected(insertion, kind):
         at_depth(task, world, 0.003)
     else:
         world["coin/pose_world"][:3] += (
-            world[f"{task.source}/pose_world"][:3]
-            - world[f"{task.target}/pose_world"][:3]
+            world[f"{task.geometry.source}/pose_world"][:3]
+            - world[f"{task.geometry.target}/pose_world"][:3]
         )
     result = task.update(world, 1).outcome
     assert result is None or result.code != "success"
@@ -114,12 +111,16 @@ def test_coin_spin_does_not_change_plane_alignment(insertion):
 def test_released_coin_can_be_off_center_and_tilted(insertion):
     task, world = insertion
     approach_and_insert(task, world)
-    frame = Rotation.from_quat(world[f"{task.target}/pose_world"][3:])
+    frame = Rotation.from_quat(world[f"{task.geometry.target}/pose_world"][3:])
     pose = world["coin/pose_world"]
-    center = Rotation.from_quat(pose[3:]).apply(task.center) + pose[:3]
+    center = Rotation.from_quat(pose[3:]).apply(task.geometry.body.center) + pose[:3]
     rotation = frame * Rotation.from_euler("x", 95, degrees=True)
     pose[3:] = rotation.as_quat()
-    pose[:3] = center + frame.apply([0.002, 0.001, 0]) - rotation.apply(task.center)
+    pose[:3] = (
+        center
+        + frame.apply([0.002, 0.001, 0])
+        - rotation.apply(task.geometry.body.center)
+    )
     world["coin/grasped_by"][:] = False
     assert task.metrics(world)["angle"] > np.deg2rad(2)
     assert task.update(world, 0.25).outcome.code == "success"
@@ -130,7 +131,7 @@ def test_coin_must_remain_in_target_after_release(insertion):
     approach_and_insert(task, world)
     world["coin/grasped_by"][:] = False
     assert task.update(world, 0.15).outcome is None
-    frame = Rotation.from_quat(world[f"{task.target}/pose_world"][3:])
+    frame = Rotation.from_quat(world[f"{task.geometry.target}/pose_world"][3:])
     world["coin/pose_world"][:3] += frame.apply([0, 0.02, 0])
     assert task.update(world, 0.15).outcome is None
     world["coin/pose_world"][:3] -= frame.apply([0, 0.02, 0])
@@ -141,7 +142,7 @@ def test_coin_must_remain_in_target_after_release(insertion):
 def test_excessive_depth_is_failure(insertion):
     task, world = insertion
     at_depth(task, world, 0.025)
-    assert task.update(world, 0.05).outcome.reason == "coin_below_slot_floor"
+    assert task.update(world, 0.05).outcome.reason == "object_below_socket_floor"
 
 
 def test_explicit_initial_fixture_does_not_disable_other_separation():
@@ -170,12 +171,12 @@ def test_thin_coin_grasp_still_requires_real_opposing_contacts():
 def test_preinsertion_goal_compensates_measured_coin_slip(insertion):
     from types import SimpleNamespace
 
-    from loom_env.experts.insertion import CoinInsertionExpert
+    from loom_env.experts.insertion import InsertionExpert
     from loom_env.specs.episode import Observation
 
     _, world = insertion
     collection = load_collection(ROOT / "configs/collection/insert_coin.yaml")
-    expert = CoinInsertionExpert(
+    expert = InsertionExpert(
         collection, SimpleNamespace(detach=lambda: None), lambda: world
     )
     expert.reset(None)
@@ -199,12 +200,12 @@ def test_preinsertion_goal_compensates_measured_coin_slip(insertion):
 def test_insertion_does_not_chase_coin_tilt(insertion):
     from types import SimpleNamespace
 
-    from loom_env.experts.insertion import CoinInsertionExpert
+    from loom_env.experts.insertion import InsertionExpert
     from loom_env.specs.episode import Observation
 
     _, world = insertion
     collection = load_collection(ROOT / "configs/collection/insert_coin.yaml")
-    expert = CoinInsertionExpert(
+    expert = InsertionExpert(
         collection, SimpleNamespace(detach=lambda: None), lambda: world
     )
     expert.reset(None)
@@ -237,7 +238,7 @@ def test_insertion_does_not_chase_coin_tilt(insertion):
 def test_insertion_accepts_readonly_world_poses(insertion):
     from types import SimpleNamespace
 
-    from loom_env.experts.insertion import CoinInsertionExpert
+    from loom_env.experts.insertion import InsertionExpert
     from loom_env.specs.episode import Observation
 
     task, world = insertion
@@ -247,10 +248,101 @@ def test_insertion_accepts_readonly_world_poses(insertion):
     assert task.metrics(world) == expected
     assert task.update(world, 0.05).outcome is None
     collection = load_collection(ROOT / "configs/collection/insert_coin.yaml")
-    expert = CoinInsertionExpert(
+    expert = InsertionExpert(
         collection, SimpleNamespace(detach=lambda: None), lambda: world
     )
     expert.reset(None)
     tcp = np.r_[world["coin/pose_world"][:3] + [0, 0, 0.12], [1, 0, 0, 0]]
     observation = Observation(0.0, {"robot/right/tcp_pose_world": tcp})
     assert np.isfinite(expert._insertion_goal(observation, world, -0.004)).all()
+
+
+def test_insertion_features_support_new_asset_ids_and_local_frames(
+    insertion, monkeypatch
+):
+    from types import SimpleNamespace
+
+    from loom_env.assets.catalog import ASSETS
+    from loom_env.experts.insertion import InsertionExpert
+    from loom_env.scenes.workspace import transform
+    from loom_env.specs.episode import Observation
+
+    original, world = insertion
+    expected = original.metrics(world)
+    collection = load_collection(ROOT / "configs/collection/insert_coin.yaml")
+    planner = SimpleNamespace(detach=lambda: None)
+    expert = InsertionExpert(collection, planner, lambda: world)
+    expert.reset(None)
+    tcp = np.array([0.4, -0.2, 0.9, 1, 0, 0, 0])
+    observation = Observation(0, {"robot/right/tcp_pose_world": tcp})
+    expected_goal = expert._insertion_goal(observation, world, -0.004)
+    objects = plain(collection.scene.objects)
+    # Relabel assets and rotate their local coordinate systems without changing
+    # physical mating geometry. Neither task nor controller may know the old IDs.
+    turn = Rotation.from_euler("xyz", [20, 35, 55], degrees=True)
+    coin = ASSETS["robodojo:coin"]
+    body = replace(
+        coin.insertion_body,
+        center=tuple(turn.inv().apply(coin.insertion_body.center)),
+        axis=tuple(turn.inv().apply(coin.insertion_body.axis)),
+    )
+    monkeypatch.setitem(ASSETS, "test:disc", replace(coin, insertion_body=body))
+    socket = ASSETS["robodojo:coin_slot"]
+    inverse = np.r_[[0, 0, 0], turn.inv().as_quat()]
+    feature = replace(
+        socket.insertion_socket,
+        pose=tuple(transform(inverse, socket.insertion_socket.pose)),
+    )
+    monkeypatch.setitem(ASSETS, "test:slot", replace(socket, insertion_socket=feature))
+    objects["coin"]["asset"] = "test:disc"
+    for name in ("source_slot", "target_slot"):
+        objects[name]["asset"] = "test:slot"
+    for name in ("coin", "source_slot", "target_slot"):
+        pose = world[f"{name}/pose_world"].copy()
+        pose[3:] = (Rotation.from_quat(pose[3:]) * turn).as_quat()
+        world[f"{name}/pose_world"] = pose
+    changed = replace(collection, scene=replace(collection.scene, objects=objects))
+    task = create_task(changed)
+    expert = InsertionExpert(changed, planner, lambda: world)
+    expert.reset(None)
+    actual_goal = expert._insertion_goal(observation, world, -0.004)
+    np.testing.assert_allclose(actual_goal[:3], expected_goal[:3], atol=1e-10)
+    delta = (
+        Rotation.from_quat(actual_goal[3:])
+        * Rotation.from_quat(expected_goal[3:]).inv()
+    )
+    assert delta.magnitude() < 1e-10
+    actual = task.metrics(world)
+    for key in expected:
+        assert actual[key] == pytest.approx(expected[key], abs=1e-10)
+
+
+def test_shared_lift_extracts_along_fixture_frame(insertion):
+    from types import SimpleNamespace
+
+    from loom_env.experts.pick_place import LiftExpert
+    from loom_env.specs.episode import Observation
+
+    _, world = insertion
+    collection = load_collection(ROOT / "configs/collection/lift_coin.yaml")
+    world["coin/grasped_by"][1] = True
+    world["source_slot/pose_world"][3:] = Rotation.from_euler(
+        "y", 90, degrees=True
+    ).as_quat()
+    goals = []
+
+    def step(observation, truth, goal, **kwargs):
+        goals.append((goal.copy(), kwargs))
+        return np.zeros(7)
+
+    expert = LiftExpert(
+        collection,
+        SimpleNamespace(detach=lambda: None, cartesian_step=step),
+        lambda: world,
+    )
+    expert.reset(None)
+    expert.stage_index = expert.STAGES.index("lift")
+    tcp = np.array([0.4, 0.2, 0.9, 1, 0, 0, 0])
+    expert._extract_step(Observation(0, {"robot/right/tcp_pose_world": tcp}))
+    np.testing.assert_allclose(goals[0][0][:3] - tcp[:3], [0.001, 0, 0], atol=1e-12)
+    assert goals[0][1]["contact_objects"] == ("source_slot",)

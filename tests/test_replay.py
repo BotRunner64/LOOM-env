@@ -104,3 +104,33 @@ def test_replay_detects_drift_of_an_unselected_object(
             0.02
         )
         assert not comparison.report()["passed"]
+
+
+@pytest.mark.parametrize("unit", ["m", "rad"])
+def test_object_joint_replay_uses_recorded_units(spec, frame_factory, unit):
+    from types import SimpleNamespace
+
+    import numpy as np
+
+    from loom_env.specs.episode import Frame
+
+    asset_id = spec.collection.scene.objects["cube"]["asset"]
+    spec = replace(
+        spec,
+        provenance={
+            "scene_assets": {
+                asset_id: {"physics_properties": {"joint": {"unit": unit}}}
+            }
+        },
+    )
+    source = frame_factory(spec)
+    key = "cube/joints/slide/position"
+    world = {**source.world_state, key: np.array(0.01)}
+    original = SimpleNamespace(
+        spec=spec, observation=lambda _: source.observation, world_state=lambda _: world
+    )
+    comparison = ReplayComparison(original)
+    comparison.add(Frame(source.observation, world), 0)
+    comparison.add(Frame(source.observation, {**world, key: np.array(0.016)}), 1)
+    assert comparison.maximum_errors[f"{key}_{unit}"] == pytest.approx(0.006)
+    assert f"{key}_{'rad' if unit == 'm' else 'm'}" not in comparison.maximum_errors

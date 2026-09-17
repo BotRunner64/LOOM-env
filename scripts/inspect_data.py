@@ -87,12 +87,12 @@ def main():
                     result["hinge_metrics"] = {
                         "initial_joint_deg": float(np.degrees(initial[task.q_key])),
                         "target_joint_deg": float(
-                            np.degrees(task.parameters["target_angle"])
+                            np.degrees(task.parameters["target_position"])
                         ),
                         "final_joint_deg": float(np.degrees(final[task.q_key])),
                         "final_error_deg": float(
                             np.degrees(
-                                abs(final[task.q_key] - task.parameters["target_angle"])
+                                abs(final[task.q_key] - task.parameters["target_position"])
                             )
                         ),
                         "grasped_samples": contact_samples,

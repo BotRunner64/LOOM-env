@@ -1,4 +1,4 @@
-"""Read fixed single-hinge object geometry and physics from the authored USD."""
+"""Read fixed single-joint object geometry and physics from the authored USD."""
 
 import numpy as np
 from scipy.spatial.transform import Rotation
@@ -21,7 +21,9 @@ def describe(stage, definition, directory=None, root=None):
     bodies = [p for p in Usd.PrimRange(root) if p.HasAPI(UsdPhysics.RigidBodyAPI)]
     expected = {definition.root_body, definition.moving_body}
     if {p.GetName() for p in bodies} != expected or len(bodies) != 2:
-        raise ValueError("Reviewed hinge asset must have exactly the two named bodies")
+        raise ValueError(
+            "Reviewed articulation asset must have exactly the two named bodies"
+        )
     result = {"bodies": {}, "root_body": definition.root_body}
     for body in bodies:
         properties = physics_properties(stage, root=body)
@@ -44,16 +46,23 @@ def describe(stage, definition, directory=None, root=None):
                 vertices=vertices,
                 faces=faces,
             )
-    joints = [p for p in Usd.PrimRange(root) if p.IsA(UsdPhysics.RevoluteJoint)]
+    joints = [
+        p
+        for p in Usd.PrimRange(root)
+        if p.IsA(UsdPhysics.RevoluteJoint) or p.IsA(UsdPhysics.PrismaticJoint)
+    ]
     if len(joints) != 1 or joints[0].GetName() != definition.joint:
-        raise ValueError("Expected the reviewed single revolute joint")
-    joint = UsdPhysics.RevoluteJoint(joints[0])
+        raise ValueError("Expected the reviewed single revolute or prismatic joint")
+    revolute = joints[0].IsA(UsdPhysics.RevoluteJoint)
+    joint = (UsdPhysics.RevoluteJoint if revolute else UsdPhysics.PrismaticJoint)(
+        joints[0]
+    )
     for rel, name in [
         (joint.GetBody0Rel(), definition.root_body),
         (joint.GetBody1Rel(), definition.moving_body),
     ]:
         if rel.GetTargets() != [root.GetPath().AppendChild(name)]:
-            raise ValueError("Hinge connects unexpected bodies")
+            raise ValueError("Joint connects unexpected bodies")
     fixed = [
         UsdPhysics.FixedJoint(p)
         for p in Usd.PrimRange(root)
@@ -79,8 +88,13 @@ def describe(stage, definition, directory=None, root=None):
         "axis": {"X": [1, 0, 0], "Y": [0, 1, 0], "Z": [0, 0, 1]}[
             joint.GetAxisAttr().Get()
         ],
-        "limits_rad": np.deg2rad(
-            [joint.GetLowerLimitAttr().Get(), joint.GetUpperLimitAttr().Get()]
+        "type": "revolute" if revolute else "prismatic",
+        "unit": "rad" if revolute else "m",
+        "limits": (
+            np.asarray(
+                [joint.GetLowerLimitAttr().Get(), joint.GetUpperLimitAttr().Get()]
+            )
+            * (np.pi / 180 if revolute else 1)
         ).tolist(),
     }
     return result

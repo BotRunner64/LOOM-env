@@ -565,7 +565,18 @@ class ManipulationEnvironment(ManagerBasedEnv):
                 for joint, q in instance.get("joint_positions", {}).items()
             }
             ready = (
-                all(error < 0.02 for error in object_joint_errors.values())
+                all(
+                    error
+                    < (
+                        0.02
+                        if self.asset_manifests[
+                            self.collection.scene.objects[key.split("/")[0]]["asset"]
+                        ]["physics_properties"]["joint"]["type"]
+                        == "revolute"
+                        else 0.001
+                    )
+                    for key, error in object_joint_errors.items()
+                )
                 and all(error < 0.003 for error in joint_errors.values())
                 and all(
                     error["xy_m"] <= 0.005 and error["height_m"] <= 0.003

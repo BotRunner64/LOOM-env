@@ -666,9 +666,9 @@ python scripts/inspect_data.py episode outputs/coin-insertion/episodes/insert-sp
 
 任务资产 `robodojo:laptop_fixed` 使用 `Articulation/laptop/00000/fixed.usda`，相对引用原始候选 `object.usda` 和几何包。固定约束、质量都在 USD 内定义，运行时不补物理属性。两 link 的显式质量取自源 USD 材料密度与原碰撞在 PhysX 中计算的结果：底座约 0.250259 kg、屏幕约 0.244225 kg；这是保留源仿真质量，不是实物称量。源碰撞、摩擦、恢复系数和铰链驱动保持不变，只有底座固定约束、显式质量和缺失的 MaterialBindingAPI 声明被加入。准备及加载检查各 link 的物理材质和质量，GPU 中的质量再次与 USD 对照。
 
-`ArticulatedAssetDefinition` 只记录根 link、活动 link、关节名称和屏幕局部抓点。关节轴、连接、限位、关节局部坐标系从 USD 读取。准备时生成各 link 局部坐标下的碰撞网格，cuRobo 按实测 link 位姿更新；接触阶段只允许接触屏幕，底座、桌子、另一臂、自碰撞与机器人限位继续参与检查。该范围是固定基座、两 link、一个旋转关节，不能直接用来加载多关节烤面包机。
+`ArticulatedAssetDefinition` 只记录根 link、活动 link、关节名称和屏幕局部抓点。关节轴、连接、限位、关节局部坐标系从 USD 读取。准备时生成各 link 局部坐标下的碰撞网格，cuRobo 按实测 link 位姿更新；接触阶段只允许接触屏幕，底座、桌子、另一臂、自碰撞与机器人限位继续参与检查。该范围是固定基座、两 link、一个旋转或滑动关节（当前实物资产回归为旋转关节），不能直接用来加载多关节烤面包机。
 
-场景的 `joint_positions` 使用具名关节与弧度；本资产 q=0 为闭合端，负 q 为打开方向，USD 源限位是 [-110°, 0°]。环境按初始角度重置并检查到位，完整原生场景快照包含物体的关节位置和速度。每帧真值新增 `laptop/joints/<joint>/position`、`velocity`，以及 `laptop/links/<body>/pose_world`、`velocity_world`、`center_of_mass_local`、`finger_contact_forces_world`。这些是 expert 可读取的仿真真值，不会自动加入策略观测。重放比较覆盖物体关节角度和两个 link 的位姿，动作仍只控制机器人。
+场景的 `joint_positions` 使用具名关节，旋转关节用弧度、滑动关节用米；本资产 q=0 为闭合端，负 q 为打开方向，USD 源限位是 [-110°, 0°]。环境按初始角度重置并检查到位，完整原生场景快照包含物体的关节位置和速度。每帧真值新增 `laptop/joints/<joint>/position`、`velocity`，以及 `laptop/links/<body>/pose_world`、`velocity_world`、`center_of_mass_local`、`finger_contact_forces_world`。这些是 expert 可读取的仿真真值，不会自动加入策略观测。重放比较覆盖物体关节角度和两个 link 的位姿，动作仍只控制机器人。
 
 专家位于 `experts/articulation.py`，沿用 `reset/act`：规划预接近及抓点 → 闭合到实测双指相向接触 → 从实测抓持末端位姿沿铰链圆弧连续运动 → 松开。平行夹爪采用对称翻转后的朝向，避免开盖过程中第六关节越界。参考角速度为 15°/s；当实测角度距目标小于 3° 时松开，不把参考轨迹完成当作屏幕到位。任务判据在 `tasks/articulation.py` 独立执行：曾在屏幕上出现双指相向接触、关节位于目标 ±15°、两指在屏幕上的接触力均低于 0.1 N，并持续 0.3 s。成功后结束记录，不要求机器人撤离或屏幕速度接近零。
 
@@ -712,7 +712,7 @@ python scripts/collect.py --collection configs/collection/open_laptop.yaml \
 
 ### 开盖与半合盖变体
 
-同一固定底座笔记本新增目标开角、操作臂与反向运动变体。两种语义任务 `open_laptop` 和 `close_laptop_partway` 共用 `LaptopHingeExpert`、`LaptopHingeTask`，任务重置时检查初始角度与目标是否符合指令方向。状态机阶段为 `approach → grasp_pose → grasp → move_hinge → release`；圆弧速度、真实接触要求、目标容差与释放判据均沿用基线。开盖／半合盖根据运动方向选择平行夹爪的两个对称抓持朝向，以避免已观察到的腕关节限位问题，不改机器人限位、碰撞或资产物理属性。
+同一固定底座笔记本新增目标开角、操作臂与反向运动变体。两种语义任务 `open_laptop` 和 `close_laptop_partway` 共用 `ArticulationExpert`、`ArticulationTask`，任务重置时检查初始角度与目标是否符合指令方向。状态机阶段为 `approach → grasp_pose → grasp → move_joint → release`；圆弧速度、真实接触要求、目标容差与释放判据均沿用基线。开盖／半合盖任务通过 `contact_index` 分别选择资产标注的两个对称抓持坐标系，以避免已观察到的腕关节限位问题，不改机器人限位、碰撞或资产物理属性。
 
 以下配置均位于 `configs/collection/`，角度表使用正的“屏幕打开角”；配置和 USD 关节状态使用负弧度。小／大开角通过现有 `task_parameters` 覆盖目标，仍复用开盖任务定义。目标数值保存在展开的任务参数中，默认语言指令仍为开盖指令。
 
@@ -740,3 +740,59 @@ python scripts/replay_episode.py outputs/laptop-variants/episodes/close-01 \
 本机本轮产物位于 `outputs/articulation-variants/`：`summary.json` 汇总四个案例的实测值，`angles.png` 对照角度曲线，`keyframes.jpg` 对照初末帧，`variants.mp4` 为四格正面视频（较短回合结束后保持末帧）。各回合完整三视角视频位于 `videos/`，成功回合 ID 分别为 `open-small`、`open-wide`、`open-left-02`、`close-partway-02`。左臂物体靠近正面画面边缘，半合盖后段存在机械臂遮挡，应结合腕相机和角度曲线检查。
 
 反向合盖与左臂开盖已分别完成物理重放，comparison JSON 位于 `replay/`，两者均通过，所比较的机器人关节、笔记本关节与两个 link 位姿误差均为零。小／大开角已做离线复核，尚未分别重放。保留的首次失败 `close-partway`、`open-left` 都由机器人关节限位触发；前者通过对称抓持朝向解决，后者通过正确的机器人局部安装位置解决。少量固定案例不能解释为任意开角、布局或多物体资产的成功率。
+
+
+## Expert 能力边界重构
+
+本轮去掉按硬币资产 ID 选择子类的分派，保留七种能力 expert。`CoinLiftExpert` 删除，夹具抽出成为 Lift／PickPlace／Insertion 共用的 `GraspTransport` 流程；退出方向取初始夹具入口坐标系的 +Z，不再写死世界 Z。已有自由物体抓放继续用原有规划路径。当前抽出距离 125 mm、速度 20 mm/s 是控制策略，仍需对新的夹具行程检验可达性，不代表任意夹具可直接成功。
+
+`InsertionExpert` 读取 `InsertionBody` 和 `InsertionSocket` 标注，专家与 `InsertionTask` 共用 `InsertionGeometry`。现有硬币标注圆柱中心、轴、半径、半厚度；槽标注入口坐标系（+Z 向外、Y 为配合面法向、X 为槽长方向）。槽的 `footprint` 仅标识允许的目标占位范围，沿用已验收的支架范围，不能把它当作孔尺寸或替代 USD 碰撞。圆柱允许绕自身轴旋转和法向反转；没有实现任意多边形配合、螺纹、受力搜索。新增资产应按真实配合特征标注，不能再从外包围盒猜入口。
+
+`ArticulationExpert` 不认识笔记本名字，也不根据任务 ID 推断动作方向或腕姿态。`target_position`、`position_tolerance`、`direction`、`hold_time` 定义任务目标；`contact_index` 指定活动 link 局部接触坐标系。笔记本开盖选 1、半合盖选 0，这是已有验证的两种抓持姿态，尚未实现自动姿态搜索。关节类型、轴、父坐标系、限位来自 USD；圆弧和直线轨迹分别使用 rad 与 m，重放误差也携带对应单位。真实双指接触历史及最终释放仍由任务独立判断。本轮未改变原有开盖与插入成功阈值。
+
+### 重新准备与运行
+
+工作目录为仓库根目录，激活 `loom-env`；已有安装好的 RoboDojo 源库、桌子和 Panda，按 [environment.md](environment.md) 配置 GPU、Vulkan、EULA。资产标注和准备协议已更新，需重新准备场景资产；不用重新下载几何或转换机器人：
+
+```bash
+python scripts/prepare_assets.py scene --source-root .cache/assets/source-links
+python scripts/collect.py --collection configs/collection/open_laptop.yaml \
+  --output-dir outputs/expert-refactor --episode-id open-01
+python scripts/collect.py --collection configs/collection/close_laptop_partway.yaml \
+  --output-dir outputs/expert-refactor --episode-id close-01
+python scripts/collect.py --collection configs/collection/insert_coin.yaml \
+  --output-dir outputs/expert-refactor --episode-id insert-01
+python scripts/collect.py --collection configs/collection/lift_coin.yaml \
+  --output-dir outputs/expert-refactor --episode-id lift-01
+python scripts/collect.py --collection configs/collection/pick_place.yaml \
+  --output-dir outputs/expert-refactor --episode-id place-01
+python scripts/inspect_data.py episode outputs/expert-refactor/episodes/open-01
+python scripts/replay_episode.py outputs/expert-refactor/episodes/close-01 \
+  --output-dir outputs/expert-refactor/replay
+```
+
+采集在沙箱外执行，回合 ID 不能复用；重复验证请换 ID。每次采集打印 `RESULT`，预期 `outcome.code=success`，并给出轨迹和视频路径。查看相应 `videos/<id>.mp4`：开合由夹爪真实接触驱动，硬币离开源槽后进入目标槽并松手，普通抓放没有退化。重放报告预期 `passed: true`。历史轨迹含旧任务参数，重新判定或重放时使用当时提交，不保留旧协议兼容层。
+
+诊断：`Prepared definition changed` 或 `Obsolete prepared asset` 表示需重新准备；`Invalid articulated contact index` 表示任务选中了不存在的接触坐标系；插入缺少 feature 时拒绝执行，不自动用包围盒补值。新资产需要视频和关节／深度／接触测量验收，局部坐标变换测试通过不能替代新物体仿真。
+
+### 本轮回归结果
+
+全部使用 seed 0，产物根目录为 `outputs/expert-refactor/`；`summary.json` 汇总实际 expert 类型、结果、步数、视频和终点测量，`<id>-report.json` 为标准检查入口输出。
+
+| 回合 | 步数 | 结果 |
+| --- | ---: | --- |
+| `open-01` | 210 | 35° → 93.154°，已释放；逐帧关节角与原 `laptop-06` 差为 0 |
+| `close-01` | 170 | 95° → 47.234°，已释放 |
+| `left-01` | 210 | 左臂开盖成功 |
+| `small-01` | 176 | 70° 目标成功 |
+| `wide-01` | 223 | 105° 目标成功 |
+| `shifted-01` | 178 | 改位置、偏航及初态后成功 |
+| `lift-01` | 259 | `LiftExpert` 从夹具抽出硬币并保持抓持 |
+| `insert-01` | 508 | `InsertionExpert` 完成插入释放，终点深度 15.748 mm、手指接触力 0；离线重算同样成功 |
+| `place-01` | 205 | 普通抓放回归成功 |
+
+这证明现有场景迁移后仍可完成，不是跨资产成功率统计。测试另外验证更换资产 ID、改变局部坐标表示后插入控制目标和判定保持一致，夹具抽出跟随入口轴，滑动关节准备与运动使用米。滑动关节尚无本轮真实物体仿真验收。
+
+SpringButton 仍是候选资产，没有接入任务。源 USD 的密度可供 PhysX 推导质量，因此缺少显式质量不等于文件损坏；但项目要求物理属性在接入前明确。源 `SpringButton/00002` 的 `E_button_01_13/Cylinder` 碰撞启用而没有物理材质绑定，不能确认作者是否有意依赖默认值。补绑同资产现有材料并固化推导质量的方案尚待确认；本轮没有修改按钮物理属性，也没有新增物体专用 expert。
+
+半合盖物理重放 `replay/close-01-replay-comparison.json` 通过：171 帧机器人关节、TCP、物体关节及 link 位姿的最大数值误差均为 0，结束结果一致。完整测试含 CUDA 共 256 项通过（`tests-gpu.log`）；修改的 Python 文件通过 Ruff E9/F 检查，`git diff --check` 通过。数值重放一致性仅对应本机这次记录。

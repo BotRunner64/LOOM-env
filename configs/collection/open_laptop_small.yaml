@@ -7,4 +7,4 @@ arm_roles:
   manipulator: right
 max_steps: 800
 task_parameters:
-  target_angle: -1.2217304763960306
+  target_position: -1.2217304763960306
