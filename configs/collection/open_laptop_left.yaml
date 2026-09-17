@@ -1,0 +1,8 @@
+task: ../tasks/open_laptop.yaml
+deployment: ../deployments/dual_panda.yaml
+scene: ../scenes/tabletop_laptop_left.yaml
+role_bindings:
+  target_object: laptop
+arm_roles:
+  manipulator: left
+max_steps: 800

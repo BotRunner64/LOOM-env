@@ -17,9 +17,13 @@ def test_hinge_step_preserves_radius_and_rotates_gripper_frame():
     )
 
 
-def test_opening_requires_contact_history_and_release():
-    task = create_task(load_collection("configs/collection/open_laptop.yaml"))
-    world = {task.q_key: np.array(-0.4), task.force_key: np.zeros((2, 2, 3))}
+@pytest.mark.parametrize(
+    ("collection", "initial"),
+    [("open_laptop_small", -np.deg2rad(35)), ("close_laptop_partway", -np.deg2rad(95))],
+)
+def test_hinge_target_requires_contact_history_and_release(collection, initial):
+    task = create_task(load_collection(f"configs/collection/{collection}.yaml"))
+    world = {task.q_key: np.array(initial), task.force_key: np.zeros((2, 2, 3))}
     task.reset(world)
     world[task.q_key] = np.array(task.parameters["target_angle"])
     for _ in range(10):
@@ -79,3 +83,13 @@ def test_usd_hinge_preparation_exports_link_local_collisions(tmp_path):
     fixed.CreateBody1Rel().SetTargets(["/Asset/" + asset.moving_body])
     with pytest.raises(ValueError, match="world-fixed"):
         describe(stage, asset)
+
+
+@pytest.mark.parametrize(
+    ("collection", "wrong_initial"),
+    [("open_laptop_small", -np.deg2rad(95)), ("close_laptop_partway", -np.deg2rad(25))],
+)
+def test_hinge_task_rejects_reversed_instruction(collection, wrong_initial):
+    task = create_task(load_collection(f"configs/collection/{collection}.yaml"))
+    with pytest.raises(ValueError, match="direction"):
+        task.reset({task.q_key: np.array(wrong_initial)})

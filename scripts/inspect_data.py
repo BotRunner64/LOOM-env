@@ -54,6 +54,53 @@ def main():
                     "camera_videos",
                 )
             }
+            if manifest["spec"]["collection"]["task"]["id"] in {
+                "open_laptop",
+                "close_laptop_partway",
+            }:
+                import numpy as np
+
+                from loom_env.data.episodes import EpisodeReader
+                from loom_env.embodiments.contacts import opposing_contacts
+                from loom_env.tasks import create_task
+
+                with EpisodeReader(args.path) as reader:
+                    task = create_task(reader.spec.collection)
+                    initial = reader.world_state(0)
+                    task.reset(initial)
+                    contact_samples, outcome = 0, None
+                    for k in range(1, len(reader) + 1):
+                        state = reader.world_state(k)
+                        contact_samples += opposing_contacts(
+                            state[task.force_key][task.side]
+                        )
+                        status = task.update(
+                            state, reader.spec.collection.deployment.control_dt
+                        )
+                        if outcome is None and status.outcome is not None:
+                            outcome = {
+                                "step": k,
+                                "code": status.outcome.code,
+                                "reason": status.outcome.reason,
+                            }
+                    final = reader.world_state(len(reader))
+                    result["hinge_metrics"] = {
+                        "initial_joint_deg": float(np.degrees(initial[task.q_key])),
+                        "target_joint_deg": float(
+                            np.degrees(task.parameters["target_angle"])
+                        ),
+                        "final_joint_deg": float(np.degrees(final[task.q_key])),
+                        "final_error_deg": float(
+                            np.degrees(
+                                abs(final[task.q_key] - task.parameters["target_angle"])
+                            )
+                        ),
+                        "grasped_samples": contact_samples,
+                        "final_finger_forces_n": np.linalg.norm(
+                            final[task.force_key][task.side], axis=-1
+                        ).tolist(),
+                        "recomputed_outcome": outcome,
+                    }
             if manifest["spec"]["collection"]["task"]["id"] == "insert_coin":
                 from loom_env.data.episodes import EpisodeReader
                 from loom_env.tasks import create_task

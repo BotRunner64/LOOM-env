@@ -1,6 +1,6 @@
 """Explicit assembly shared by collection, replay, and physical validation."""
 
-from loom_env.experts.articulation import OpenLaptopExpert
+from loom_env.experts.articulation import LaptopHingeExpert
 from loom_env.experts.handover import HandoverExpert
 from loom_env.experts.insertion import CoinInsertionExpert, CoinLiftExpert
 from loom_env.experts.pick_place import LiftExpert, PickPlaceExpert
@@ -9,7 +9,8 @@ from loom_env.experts.sweep import SweepExpert
 from loom_env.tasks import create_task
 
 EXPERTS = {
-    "open_laptop": OpenLaptopExpert,
+    "open_laptop": LaptopHingeExpert,
+    "close_laptop_partway": LaptopHingeExpert,
     "insert_coin": CoinInsertionExpert,
     "put_object_in_container": PickPlaceExpert,
     "lift_object": LiftExpert,

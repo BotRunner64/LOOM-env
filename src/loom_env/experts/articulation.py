@@ -1,4 +1,4 @@
-"""Grasp a screen edge and open the passive hinge through robot contact."""
+"""Grasp a screen edge and move the passive hinge through robot contact."""
 
 import numpy as np
 from scipy.spatial.transform import Rotation
@@ -22,7 +22,7 @@ def hinge_step(body_pose, hinge_pose, axis, delta):
     ]
 
 
-class OpenLaptopExpert:
+class LaptopHingeExpert:
     def __init__(self, collection, planner, world_state):
         self.collection, self.planner, self.world_state = (
             collection,
@@ -31,7 +31,9 @@ class OpenLaptopExpert:
         )
         self.side = collection.arm_roles["manipulator"]
         if collection.deployment.arms[self.side].asset != PANDA_ASSET:
-            raise ValueError("Laptop opening currently requires the reviewed Panda fingers")
+            raise ValueError(
+                "Laptop hinge manipulation currently requires the reviewed Panda fingers"
+            )
         self.obj = collection.role_bindings["target_object"]
         self.asset = asset_definition(collection.scene.objects[self.obj]["asset"])
         self.arm_slice = collection.deployment.action_slices[f"{self.side}/arm"]
@@ -47,7 +49,7 @@ class OpenLaptopExpert:
             <= self.target
             <= self.hinge["limits_rad"][1]
         ):
-            raise ValueError("Opening target exceeds USD joint limits")
+            raise ValueError("Hinge target exceeds USD joint limits")
 
     def close(self):
         self.planner.planner.destroy()
@@ -56,6 +58,11 @@ class OpenLaptopExpert:
         self.command = initial_command(self.collection.deployment)
         self.stage, self.step, self.stage_steps = "approach", 0, 0
         self.path, self.index, self.stable = None, 0, 0
+        initial_q = float(
+            self.world_state()[f"{self.obj}/joints/{self.asset.joint}/position"]
+        )
+        # Symmetric finger ordering selects a wrist posture for each direction.
+        self.grasp_roll = np.pi if self.target < initial_q else 0.0
         self.planner.detach()
 
     def _change(self, stage, events):
@@ -71,7 +78,7 @@ class OpenLaptopExpert:
     def _tcp(self, body, offset=0.0):
         # Finger closing direction is screen thickness; approach along its edge.
         rotation = Rotation.from_quat(body[3:].copy()) * Rotation.from_euler(
-            "xz", [np.pi, np.pi]
+            "xz", [np.pi, self.grasp_roll]
         )
         point = transform(body, [*self.asset.contact, 0, 0, 0, 1])[:3]
         point += Rotation.from_quat(body[3:].copy()).apply([0, 0, offset])
@@ -113,9 +120,9 @@ class OpenLaptopExpert:
                 self.stable = self.stable + 1 if error < 0.01 else 0
                 if self.stable >= 3:
                     self._change(
-                        "grasp_pose" if self.stage == "approach" else "close", events
+                        "grasp_pose" if self.stage == "approach" else "grasp", events
                     )
-        elif self.stage == "close":
+        elif self.stage == "grasp":
             self.command[self.grip_slice] = 0.0
             self.stable = self.stable + 1 if opposing_contacts(forces) else 0
             if self.stable >= 3:
@@ -124,8 +131,8 @@ class OpenLaptopExpert:
                 self.grasp_tcp = observation.values[
                     f"robot/{self.side}/tcp_pose_world"
                 ].copy()
-                self._change("open", events)
-        elif self.stage == "open":
+                self._change("move_hinge", events)
+        elif self.stage == "move_hinge":
             remaining = self.target - q
             if abs(remaining) < np.deg2rad(3):
                 self._change("release", events)
@@ -154,7 +161,7 @@ class OpenLaptopExpert:
         elif self.stage == "release":
             self.command[self.grip_slice] = 0.08
         if self.stage_steps * self.dt > 20:
-            raise SourceFailure(f"Opening stage {self.stage} timed out", kind="skill")
+            raise SourceFailure(f"Hinge stage {self.stage} timed out", kind="skill")
         self.step += 1
         self.stage_steps += 1
         return Action(self.command.copy(), tuple(events))

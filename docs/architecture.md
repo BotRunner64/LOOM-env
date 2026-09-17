@@ -55,3 +55,5 @@ flowchart LR
 | 轨迹读写与校验 | `data/`，可独立于仿真使用 |
 
 命令入口在 `scripts/`，依赖在 `pyproject.toml`。随[任务与场景拓展](expansion-plan.md)按具体案例检查组装入口的角色假设和部署与本体定义的重复；进度统一见 [README](../README.md#当前进度)。
+
+固定底座笔记本的开盖和半合盖复用 `LaptopHingeExpert` 与 `LaptopHingeTask`：目标角来自任务参数，初始关节角来自场景，任务检查运动方向、真实抓持历史与最终释放。两种指令对应同一套接近、抓持、铰链圆弧运动和释放流程，未增加通用动作流程语言。运行与证据见[关节变体](implementation.md#开盖与半合盖变体)。

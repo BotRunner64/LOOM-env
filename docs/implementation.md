@@ -709,3 +709,34 @@ python scripts/collect.py --collection configs/collection/open_laptop.yaml \
 失败过程也保留在同目录：25° 初态的两次最终抓点规划失败；35° 初态已能抓住屏幕，但逐帧重建标注抓点的参考会使其缓慢合上，最终碰撞检查拒绝；改为实测抓持位姿的连续圆弧后可打开至约 66°，原腕姿态触及第六关节限位。最终使用夹爪的对称朝向通过，没有删除碰撞或限位检查。首版依赖足够的初始开角与可达布局，不承诺任意安装位置、完全闭合开盖或其他本体。
 
 源薄网格仍可能触发 PhysX GPU 碰撞烹饪回退警告；源铰链是被动环境物体，Isaac Lab 的“0 != 1 actuators”提示为未配置机器人式关节执行器，不应为了消除提示给屏幕添加位置驱动。实际接触效果以视频、关节与接触力记录为准。若失败，先查看回合事件和日志中失败阶段；初态不稳定看 `object_joint_errors`，规划失败看布局、抓点和机器人可达性，关节越界看实际机器人关节曲线。
+
+### 开盖与半合盖变体
+
+同一固定底座笔记本新增目标开角、操作臂与反向运动变体。两种语义任务 `open_laptop` 和 `close_laptop_partway` 共用 `LaptopHingeExpert`、`LaptopHingeTask`，任务重置时检查初始角度与目标是否符合指令方向。状态机阶段为 `approach → grasp_pose → grasp → move_hinge → release`；圆弧速度、真实接触要求、目标容差与释放判据均沿用基线。开盖／半合盖根据运动方向选择平行夹爪的两个对称抓持朝向，以避免已观察到的腕关节限位问题，不改机器人限位、碰撞或资产物理属性。
+
+以下配置均位于 `configs/collection/`，角度表使用正的“屏幕打开角”；配置和 USD 关节状态使用负弧度。小／大开角通过现有 `task_parameters` 覆盖目标，仍复用开盖任务定义。目标数值保存在展开的任务参数中，默认语言指令仍为开盖指令。
+
+| Collection | 操作臂 | 初始 → 目标开角 | 实测最终开角 | 步数／模拟时长 |
+| --- | --- | --- | --- | --- |
+| `open_laptop_small.yaml` | 右 | 35° → 70° | 67.92° | 176／8.80 s |
+| `open_laptop_wide.yaml` | 右 | 35° → 105° | 102.94° | 223／11.15 s |
+| `open_laptop_left.yaml` | 左 | 35° → 95° | 93.16° | 210／10.50 s |
+| `close_laptop_partway.yaml` | 右 | 95° → 45° | 47.23° | 170／8.50 s |
+
+四个案例均在 seed 0 完成实测与离线判据复核，最终双指与屏幕的接触力为零，测得底座平移为零。左臂场景将物体移到与右臂基线相同的机器人局部位置：两臂基座朝向相同，不能把世界 Y 简单取反当成同一局部构型。半合盖有独立的打开初态场景，仍不涉及完全合盖或夹爪从闭合缝隙退出。另提供 `open_laptop_shifted.yaml` collection，直接引用上一节已验收的平移／偏航／45° 初态场景，避免每次手填 `--scene`；本轮没有重复采集该旧案例。
+
+从仓库根目录激活 `loom-env`，确保上一节的资产已准备、GPU/EULA 已配置，直接选择上述任一 collection：
+
+```bash
+python scripts/collect.py --collection configs/collection/close_laptop_partway.yaml \
+  --output-dir outputs/laptop-variants --episode-id close-01
+python scripts/inspect_data.py episode outputs/laptop-variants/episodes/close-01
+python scripts/replay_episode.py outputs/laptop-variants/episodes/close-01 \
+  --output-dir outputs/laptop-variants/replay
+```
+
+`inspect_data.py episode` 现在对这两类任务输出 `hinge_metrics`：初始／目标／最终关节角（度，保留负号）、最终角度误差、双指相向接触帧数、终点双指接触力和独立重算的成功步骤。检查 `outcome.code` 与 `hinge_metrics.recomputed_outcome.code` 均为 `success`；数据检查本身不等同于仿真任务成功。更换 collection 和唯一 episode ID 即可运行其他变体，采集仍自动生成三路视频及拼接预览。
+
+本机本轮产物位于 `outputs/articulation-variants/`：`summary.json` 汇总四个案例的实测值，`angles.png` 对照角度曲线，`keyframes.jpg` 对照初末帧，`variants.mp4` 为四格正面视频（较短回合结束后保持末帧）。各回合完整三视角视频位于 `videos/`，成功回合 ID 分别为 `open-small`、`open-wide`、`open-left-02`、`close-partway-02`。左臂物体靠近正面画面边缘，半合盖后段存在机械臂遮挡，应结合腕相机和角度曲线检查。
+
+反向合盖与左臂开盖已分别完成物理重放，comparison JSON 位于 `replay/`，两者均通过，所比较的机器人关节、笔记本关节与两个 link 位姿误差均为零。小／大开角已做离线复核，尚未分别重放。保留的首次失败 `close-partway`、`open-left` 都由机器人关节限位触发；前者通过对称抓持朝向解决，后者通过正确的机器人局部安装位置解决。少量固定案例不能解释为任意开角、布局或多物体资产的成功率。
