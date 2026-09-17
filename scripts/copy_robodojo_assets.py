@@ -74,13 +74,13 @@ def copy_model(source, target, row):
     dst.mkdir(parents=True, exist_ok=True)
     files = {}
     definition = ROOT / "configs/assets/robodojo" / row["path"] / "object.usda"
-    for original in (src / "object.usdz", definition):
+    for original in (src / "object.usdz", *sorted(definition.parent.glob("*.usda"))):
         destination = dst / original.name
         expected = digest(original)
         if destination.is_symlink():
             raise ValueError(f"Refusing symlink destination: {destination}")
         changed = destination.exists() and digest(destination) != expected
-        if changed and original != definition:
+        if changed and original.suffix != ".usda":
             raise ValueError(f"Existing geometry differs from source: {destination}")
         if not destination.exists() or changed:
             temporary = destination.with_name(destination.name + ".partial")

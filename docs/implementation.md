@@ -512,3 +512,131 @@ done
 对应报告为 `outputs/sweep-objects/replay/<id>-replay-comparison.json`。鼠标与华夫饼仍超过原工具重放容差，鼠标目标自身也超过 5 mm；任务结果一致不能替代误差验收。反馈抬升解决的是本轮收尾时刷头未离桌的问题，不代表消除了抓持转动或重放差异。工具规划包络来自抬升后的实测抓持变换，未逐帧追踪接触中的相对转动；当前只验收无遮挡直线场景，不能推广为复杂障碍下的工具避碰保证。
 
 同一实现下重新采集原积木 `outputs/sweep-objects/episodes/brick-regression`，283 步成功、离线判据及视频完整性检查通过；本轮未重放该新积木回合，原积木重放历史见前节。三个新对象的重放三路视频完整性检查也通过；误差检查失败与视频损坏是不同结果。
+
+## 插入候选：固定螺栓与螺母
+
+本节记录最初螺栓／螺母配对的可行性验证；该配对没有接入专家，后续实现转向[硬币插回固定槽](#硬币插回固定槽)。首个讨论确认的方向为固定螺栓、Panda 抓螺母沿轴套入、不主动旋拧。已有 `Geometry/factory_bolt/00000` 与 `Rigid/factory_nut/00000` 的源碰撞包含螺纹；不能将其视为有间隙的光滑销孔。
+
+### 独立物理验证
+
+工作目录为仓库根目录，激活完整 `loom-env` 环境，完成[环境设置](environment.md)。只需 `.cache/assets/robodojo/` 中上述两个对象的 `object.usdz`；小型 USD 物理定义已在 `configs/assets/robodojo/`，无需先迁移整个本地资产库。入口校验源几何哈希，将定义与几何复制到新的输出目录，从 USD 读取质量、碰撞与材质，不读取旧 metadata。
+
+```bash
+python scripts/check_insertion_pair.py \
+  --output-dir outputs/insertion-pair-01 --force 1
+```
+
+输出目录必须不存在；重复试验更换路径。`--source-root` 可指定另一份相同版本的 RoboDojo 几何库；`--force` 为额外向下力，允许 0–2 N，默认 1 N。输出：
+
+- `report.json`：源哈希、刚体局部边界、源物理值、初始间隙、逐帧位姿与三阶段终点测量。
+- `probe.mp4`：640×480、30 fps、6 s 的物理过程。
+- `step-*.png`：初始帧及各阶段结束前的相机图像。
+- `bolt/`、`nut/`：本次实际使用的源定义、几何与检查用碰撞网格。
+
+试验将螺栓安装为固定障碍物（仅在诊断场景关闭其刚体运动，保留源碰撞和材料），螺母为自由动态刚体。0–2 s 自由落下，2–4 s 在质心施加世界坐标向下力，4–6 s 撤去额外力。全程不写入运动中的位姿、不约束螺母旋转、不改变质量、摩擦、碰撞形状或接触偏移。该试验没有机器人，不是专家采集，也不验证抓取或成功率。程序正常退出只代表试验完整完成，不代表插入成功。
+
+源螺栓根节点具有 −26.25 mm 平移，USD 实例化会替换根位姿。脚本将网格转换到刚体局部坐标，按局部最低点安装，并核对实例化后的世界边界；螺母最低点初始高于螺栓顶端 5 mm，排除初始重叠。`axial_entry_m` 是按直立局部最低点估算的轴向进入量，必须结合侧偏与倾角判断；`lowest_point_overlap_m` 是实际旋转后的最低点与螺栓顶面的高度重叠，不等同于孔道有效插入深度。
+
+### 当前结果与下一步
+
+2026-09-17，固定初态、额外力 1 N，得到：
+
+| 阶段终点（约） | 轴向进入量 | 侧偏 | 倾角 |
+| --- | --- | --- | --- |
+| 自重 2 s | 2.664 mm | 0.339 mm | 1.69° |
+| 额外向下力 2 s | 2.700 mm | 0.359 mm | 1.72° |
+| 撤力 2 s | 2.664 mm | 0.376 mm | 1.80° |
+
+螺母局部厚度约 19.11 mm。试验停留在入口附近，增加力只带来约 0.036 mm 的进入量变化；当前配对未通过直线插入可行性验证。源截面也显示螺纹几何干涉，但此试验没有证明旋拧一定成功，不能推广到所有相位、姿态或控制方式。不能靠放宽成功深度、删除碰撞或强制位姿通过验收。
+
+本机有效证据位于 `outputs/insertion-investigation/force-01/`。更早 `probe.json` 存在源根变换处理错误、初始重叠，**无效，不可作为插入证据**；`aligned/` 修正了这一问题，但仅验证自重。正式复现以本节脚本为准。
+
+首个无旋拧 expert 需要另选可通行配对，或经讨论改变几何／任务范围。已有 `Rigid/coin/00000` 与 `Geometry/vertical_coin_stand/00000` 是候选：源几何中硬币厚约 1.94 mm，支架中心截面槽宽约 2.21–2.90 mm；这些只是源网格测量，尚未验证 PhysX 烹饪后的孔道、机器人抓取和插入过程。
+
+### 本次节点的启动排查
+
+本次节点为 RTX 4090，与环境文档里的历史 RTX 5090 节点不同。系统 `/usr/share/vulkan/icd.d/nvidia_icd.json.disabled` 为空，不能直接指定它运行。试验在输出目录创建局部 ICD 配置，引用已有且与驱动版本匹配的 `libGLX_nvidia.so.0`，以 `vulkaninfo --summary` 确认设备可见后使用；没有修改系统驱动或配置：
+
+```bash
+mkdir -p outputs/insertion-investigation
+cat > outputs/insertion-investigation/nvidia_icd.json <<'JSON'
+{"file_format_version":"1.0.0","ICD":{"library_path":"/usr/lib/x86_64-linux-gnu/libGLX_nvidia.so.0","api_version":"1.3.194"}}
+JSON
+export VK_DRIVER_FILES="$PWD/outputs/insertion-investigation/nvidia_icd.json"
+export VK_ICD_FILENAMES="$VK_DRIVER_FILES"
+vulkaninfo --summary
+# 激活 loom-env，按环境说明设置 EULA；此节点 CPU 0–7 可用。
+taskset -c 0-7 env OMP_NUM_THREADS=4 OPENBLAS_NUM_THREADS=4 MKL_NUM_THREADS=4 \
+  python scripts/check_insertion_pair.py \
+  --output-dir outputs/insertion-pair-02 --force 1
+```
+
+上述库路径与 CPU 范围仅适用于本次节点，其他机器按实际驱动与 CPU 亲和范围设置。有效试验仍记录 `nvidia-smi`／telemetry 子进程启动失败，以及已知的 Protobuf、Semantics、Fabric streaming 诊断；Vulkan 设备已创建、物理步进和相机输出完成，不表示这些上游日志已解决。首轮因无有效 Vulkan 配置失败的日志也保留在调查目录。
+
+### 硬币槽与其他项目参考
+
+用户已选择现有硬币／竖直硬币支架配对。独立检查沿用上面的环境，执行：
+
+```bash
+python scripts/check_insertion_pair.py --pair coin_slot --force 0.1 \
+  --output-dir outputs/coin-slot-probe
+```
+
+配对脚本现在统一使用 `fixture/`、`insert/` 输出子目录；不带 `--pair` 仍选择 `nut_bolt`，用于复现前述受阻结果。硬币绕局部 X 旋转 90°，以几何中心对齐槽中心，从上方 5 mm 间隙释放。2026-09-17 的 `outputs/insertion-investigation/coin-slot-01/` 中，自重进入约 15.811 mm，加 0.1 N 后约 15.821 mm，撤力后约 15.814 mm；终点画面确认硬币位于支架中。这是自由物体配对小试验，不代表机器人专家已完成。
+
+圆形硬币绕自身法向旋转不改变插入几何。该回合早期报告以选定径向轴计算倾斜，约 10.4° 的值混入了这种对称旋转；以原记录位姿重新计算的 `plane-metrics.json` 使用硬币平面法向，撤力后约 0.889°，几何中心侧偏约 0.0245 mm。原报告保留，脚本已改用法向和几何中心。这个侧偏是几何中心到槽中心的 XY 距离，不是币边到槽壁的间隙；进入量仍需结合画面与姿态，不单独当作成功判据。
+
+本轮只读参考了本地源码，未运行这些项目的任务：
+
+| 项目与本地提交 | 入口（相对该项目根目录） | 可借鉴内容与边界 |
+| --- | --- | --- |
+| ManiSkill `62ff3a5` | `mani_skill/envs/tasks/tabletop/peg_insertion_side.py`；`mani_skill/examples/motionplanning/panda/solutions/peg_insertion_side.py` | 方销和四块长方体围成的孔成对生成，孔半宽比销半宽多 3 mm；孔为 kinematic。专家抓取、到预插入位姿、根据实测销位姿修正三次，再推进；采用 PD 关节位置控制。判据实际只检查销头在孔坐标系的轴向位置与横向范围，不可声称它额外检查完整姿态或接触。 |
+| ManiSkill 同版本 | `mani_skill/examples/motionplanning/panda/solutions/plug_charger.py` | 使用目标物体位姿乘以实测物体到 TCP 的变换构造预插入／插入目标；执行前细化预插入运动。这两份专家中未见力搜索或螺旋搜索。 |
+| RoboDojo `ee67a14` | `task/RoboDojo/config/deposit_coin.yml`；`task/RoboDojo/tasks/deposit_coin.py` | `vertical_coin_stand` 是起始支架，实际目标是 `piggy_bank`；奖励检查硬币包围盒进入储蓄罐范围及机器人回位。不能把“插回支架”描述成原版 deposit_coin。当前调查找到任务配置与判据，未找到对应完整脚本专家。 |
+| RoboDojo 同版本 | `task/RoboDojo/tasks/insert_tubes.py` | 试管任务同时检查 45 mm 深度、位于架内、轴朝上误差不超过 30°以及机器人回位，体现深度／横向／朝向分开验收。 |
+| RLBench `02720bba` | `rlbench/tasks/insert_onto_square_peg.py`、`insert_usb_in_computer.py`、`plug_charger_in_power_supply.py`；`rlbench/backend/scene.py` | 示范从场景路点规划执行；方环套柱使用四个检测器，USB 检测端部，充电器检查双插脚分别入孔并要求松手。任务 Python 文件不是独立的接触控制专家，也不能从检测器数量推断精确插入容差。 |
+
+当前硬币槽方案是自定义最小插入案例；可沿用同种支架作为起始支撑与目标槽，从露出部分抓取，再按实测抓持变换对齐和推进。先验证抓取可行性，再确定可观察的插入／释放终点。不要直接照搬其他项目的数值容差，或把“配对物体能进入”当成机械臂运动与碰撞已经通过。
+
+## 硬币插回固定槽
+
+组合入口为 `configs/collection/insert_coin.yaml`，抓起阶段可单独运行 `configs/collection/lift_coin.yaml`。两者共用一个固定场景：硬币在起始支架内竖放，Panda 右臂从露出部分面夹取出，移到另一个相同固定槽，对齐后沿槽轴插入并松手。它是自定义的支架插回任务，不是 RoboDojo 的储蓄罐投币任务；目前只支持已测量的这对资产。
+
+固定支架由 `configs/assets/robodojo/Geometry/vertical_coin_stand/00000/fixed.usda` 引用已有完整 `object.usda`，在 USD 中关闭刚体运动以表达安装；碰撞几何与材料不变。硬币沿用源 5 g 质量和物理材质。场景 `initial_fixture: source_slot` 明确声明硬币初态位于支架内；采样器只豁免这一对的包围盒间距，要求硬币 XY 包围范围位于指定静态支架范围内，其他物体仍须分离。该配置不是碰撞过滤，实际物理检查照常进行。
+
+在仓库根目录、激活完整 `loom-env` 环境并完成 EULA／GPU 设置后执行。已有本地 RoboDojo 几何时，将对应版本定义安装到同目录；标准全库安装入口见[资产库说明](scene-assets.md)，安装器同时复制固定安装层。仅补齐本案例的小型定义可执行：
+
+```bash
+cp configs/assets/robodojo/Rigid/coin/00000/object.usda \
+  .cache/assets/robodojo/Rigid/coin/00000/object.usda
+cp configs/assets/robodojo/Geometry/vertical_coin_stand/00000/*.usda \
+  .cache/assets/robodojo/Geometry/vertical_coin_stand/00000/
+python scripts/prepare_assets.py scene --source-root .cache/assets/source-links \
+  --scene-asset robodojo:coin --scene-asset robodojo:coin_slot --scene-asset maniskill:table
+python scripts/inspect_data.py config configs/collection/insert_coin.yaml
+python scripts/collect.py --collection configs/collection/lift_coin.yaml \
+  --output-dir outputs/coin-insertion --episode-id lift-demo
+python scripts/collect.py --collection configs/collection/insert_coin.yaml \
+  --output-dir outputs/coin-insertion --episode-id insert-demo
+python scripts/inspect_data.py episode outputs/coin-insertion/episodes/insert-demo
+python scripts/replay_episode.py outputs/coin-insertion/episodes/insert-demo \
+  --output-dir outputs/coin-insertion-replay
+```
+
+前置源几何是同目录的 `object.usdz`，版本与哈希在资产定义中固定；`source-links` 布局同[资产准备](#资产准备)，桌子需要对应 ManiSkill GLB，Panda 使用现有部署资产。此节点 Vulkan 局部配置见[插入候选排查](#本次节点的启动排查)。采集在沙箱外运行，回合 ID 与重放输出目录不得复用。三路视频在 `episodes/<id>/cameras/`，拼接视频在 `videos/<id>.mp4`。失败回合也保存，不能仅凭视频生成判断任务成功。
+
+实现入口为 `experts/insertion.py` 与 `tasks/insertion.py`。抓取按初态实测硬币法向确定夹爪闭合方向；取出阶段用受跟踪误差限制的竖直参考轨迹，转移阶段减速执行规划路径。预插入和插入根据实测硬币到 TCP 的变换修正目标；物体始终是自由刚体，没有抓取固定约束或运行中位姿写入。固定支架只在对应取出／插入接触阶段从规划器障碍检查中排除，物理碰撞始终开启。夹持检测只使用目标上的实测双指接触，不使用夹爪开度或开度比例。
+
+任务不读取专家阶段：需依次观察到持币离开起始支架、持币在目标入口上方对齐、持币达到插入深度，最后松手且手指不再接触目标，持续满足判据。槽坐标系中分别检查深度、沿槽／跨槽侧偏和硬币平面法向；圆形硬币绕自身法向的转动不作姿态误差。完整阈值在 `configs/tasks/insert_coin.yaml` 单处配置；不使用低速度作为成功条件。`inspect_data.py episode` 的 `insertion_metrics` 给出终点测量、取出／接近／持币进入证据及逐帧重算结果。
+
+早期抓取证据保留在 `outputs/coin-insertion/`：`lift-02` 圆边夹取将硬币推出支架；`lift-03` 面夹建立接触但快速抬升后滑落；`lift-04` 慢速取出持续夹持并上升约 37 mm，但因参考轨迹每步重新基于实测位置、实际速度偏低而耗尽 450 步。当前参考轨迹会随时间推进，并限制参考位置领先实测位置的距离。这些失败／超时记录不能当作完整抓起或插入成功。
+
+移除全部开度代理后的完整回合 `insert-02` 已完成实际取出、转移和入口对齐：最大离开起始槽高度约 108.62 mm，第 363 步转移、第 526 步对齐、第 618 步开始插入。第 739 步因插入停滞中止；终点深度约 2.16 mm、跨槽偏差约 6.92 mm、硬币平面角误差约 31.44°，双指仍有相向接触。腕部画面显示硬币已经倾斜，因此接触成立不能当作抓持姿态稳定或插入成功。离线任务重算同样未成功；准确的卡阻原因尚未确认。数据、三路视频和测量分别在 `outputs/coin-insertion/episodes/insert-02/`、`outputs/coin-insertion/videos/insert-02.mp4`、`outputs/coin-insertion/insert-02-report.json`。对应代码检查 238 项测试通过，但不替代尚未通过的完整插入效果验收。
+
+## 抓持滑移复核（2026-09-17）
+
+只读诊断入口 `outputs/grasp-investigation/audit_collect.py` 包装标准 `scripts/collect.py`，参数相同；不修改控制、材质或碰撞。先按资产准备说明安装并准备 `robodojo:tea_carton_pack`，在仓库根目录、完整环境及上述 GPU 设置下执行 `python outputs/grasp-investigation/audit_collect.py --collection configs/collection/handover.yaml --output-dir outputs/grasp-investigation --episode-id tea-baseline --max-steps 700`。回合 ID 不可复用。`*-physics.json` 记录实际 PhysX 材质和驱动参数，`*-drives.jsonl` 记录只读关节状态；其 step 为包装器调用计数，包含回合准备步骤，不能直接当轨迹帧号。隐式执行器 `applied_torque` 是 PD 力估计，不能称为独立测力读数。
+
+`tea-baseline` 完成全部交接动作，700 步超时。运行时纸包质量 0.45 kg、各碰撞形状摩擦 0.42，Panda 各形状摩擦 0.5，未发现物体材料漏加载。`python outputs/grasp-investigation/analyze.py` 直接比较轨迹的物体到 TCP 变换，生成 `tea-baseline-analysis.json`：递出首次抬升（121→173）相对转动 10.11°、原点相对位移 9.70 mm；173→280 基本保持不变。接收独立持有（342→700）相对转动约 0.00187°、位移约 0.00554 mm，双指目标接触力范数约 46 N。因此不能把整个超时回合概括为持续滑落。末段另有速度信号待查：轨迹角速度约 0.432 rad/s，但相邻 50 ms 位姿差分约 1e-5 rad/s；尚未区分子步运动、求解器速度与位姿修正或状态读取问题，不以差分替代成功判据。
+
+参考实现差异：本地 ManiSkill `mani_skill/agents/robots/panda/panda.py` 为 Panda 手指设置摩擦 2.0、patch_radius/min_patch_radius=0.1，并将夹爪位置目标下限设为 -0.01 m，注释明确用于薄物体夹持力。本项目闭合目标为 0，不能声称与它相同。RLBench `rlbench/backend/task.py::register_graspable_objects` 明确说明稳定抓取使用 PyRep 将物体作为夹爪子对象附着，不能据此推断纯接触抓取不会滑动。真机 Franka 的 grasp(width, speed, force, ...) 可指定抓持力，区别于 move(width, speed)；当前位置 PD 闭合尚未实现等价的 grasp 控制语义。官方接口见 https://support.franka.de/docs/franka_ros.html ，官方仿真控制说明见 https://frankarobotics.github.io/docs/doc/franka_ros/franka_gazebo/doc/index.html 。这些差异提供排查方向，不是本案根因已全部确定的证据。

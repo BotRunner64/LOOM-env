@@ -1,0 +1,12 @@
+#usda 1.0
+(
+    defaultPrim = "Asset"
+    metersPerUnit = 1
+    upAxis = "Z"
+)
+def Xform "Asset" (
+    prepend references = @object.usda@
+)
+{
+    bool physics:rigidBodyEnabled = false
+}

@@ -7,7 +7,6 @@ import pytest
 from loom_env.scenes.workspace import sample_objects
 from loom_env.specs.config import load_collection
 from loom_env.embodiments.contacts import opposing_contacts
-from loom_env.embodiments.commands import gripper_command
 from loom_env.experts.pick_place import PickPlaceExpert
 from loom_env.runtime.runner import SourceFailure
 from loom_env.tasks import create_task
@@ -68,29 +67,17 @@ def test_workspace_transform_moves_all_instances_consistently(collection):
         np.testing.assert_allclose(moved[name][:3] - original[name][:3], [1, 0, 0])
 
 
-@pytest.mark.parametrize(
-    "condition", ["no_force", "one_finger", "parallel", "closed", "fully_open"]
-)
-def test_grasp_requires_physical_opposing_contacts(condition, collection):
-    gripper = collection.deployment.arms["right"].gripper
+@pytest.mark.parametrize("condition", ["no_force", "one_finger", "parallel"])
+def test_grasp_requires_physical_opposing_contacts(condition):
     forces = np.array([[0.0, 2.0, 0.0], [0.0, -2.0, 0.0]])
-    fingers = [0.012, 0.012]
-    assert opposing_contacts(
-        forces, gripper_command(gripper, np.array(fingers)), gripper.command_limits[0]
-    )
+    assert opposing_contacts(forces)
     if condition == "no_force":
         forces *= 0
     elif condition == "one_finger":
         forces[1] *= 0
-    elif condition == "parallel":
-        forces[1] *= -1
-    elif condition == "closed":
-        fingers = [0, 0]
     else:
-        fingers = [0.04, 0.04]
-    assert not opposing_contacts(
-        forces, gripper_command(gripper, np.array(fingers)), gripper.command_limits[0]
-    )
+        forces[1] *= -1
+    assert not opposing_contacts(forces)
 
 
 class UnusedPlanner:

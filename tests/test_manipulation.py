@@ -5,7 +5,6 @@ import numpy as np
 import pytest
 from scipy.spatial.transform import Rotation
 
-from loom_env.embodiments.commands import gripper_command
 from loom_env.embodiments.contacts import opposing_contacts
 from loom_env.experts.pick_place import LiftExpert, PickPlaceExpert
 from loom_env.specs.config import load_deployment
@@ -64,17 +63,6 @@ def test_grasp_goal_places_contact_center_on_object(collection, name, base_yaw):
         )
 
 
-def test_grasp_evidence_uses_signed_joint_mapping(collection):
-    gripper = replace(
-        collection.deployment.arms["right"].gripper,
-        joint_map=((-0.5,), (0.5,)),
-    )
-    forces = np.array([[0, 2, 0], [0, -2, 0]])
-    opening = gripper_command(gripper, np.array([-0.015, 0.015]))
-    assert opposing_contacts(forces, opening, gripper.command_limits[0])
-    assert not opposing_contacts(forces, 0.0, gripper.command_limits[0])
-
-
 def test_expert_uses_deployment_gripper_command_limits(spec, frame_factory):
     arm = spec.collection.deployment.arms["right"]
     arm = replace(arm, gripper=replace(arm.gripper, command_limits=((0.01, 0.06),)))
@@ -129,14 +117,13 @@ def test_retreat_returns_to_measured_pose_before_lowering(spec, frame_factory):
     np.testing.assert_array_equal(goal, reached)
 
 
-@pytest.mark.parametrize("limits", [(0.0, 0.08), (0.0, 0.81), (0.0054, 0.11)])
-def test_contact_evidence_uses_fraction_for_linear_and_angular_commands(limits):
-    low, high = limits
+def test_contact_evidence_has_no_opening_or_command_parameters():
+    import inspect
+
+    assert tuple(inspect.signature(opposing_contacts).parameters) == ("forces",)
     forces = np.array([[0, 2, 0], [0, -2, 0]])
-    assert opposing_contacts(forces, low + 0.4 * (high - low), limits)
-    for fraction in (0.0, 0.02, 0.995, 1.0):
-        assert not opposing_contacts(forces, low + fraction * (high - low), limits)
-    assert not opposing_contacts(-np.abs(forces), low + 0.4 * (high - low), limits)
+    assert opposing_contacts(forces)
+    assert not opposing_contacts(-np.abs(forces))
 
 
 @pytest.mark.parametrize("name", ["yam", "xarm6_robotiq"])

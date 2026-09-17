@@ -37,6 +37,28 @@ class AssetDefinition:
 
 TABLE_SCALE = 0.75 / 0.5255104303359985
 ASSETS = {
+    "robodojo:coin": AssetDefinition(
+        "coin",
+        "https://huggingface.co/datasets/RoboDojo-Benchmark/RoboDojo",
+        "a14409d7fae673c00499e01fd88b4457df6351b1",
+        "RoboDojo/Assets/Object/RoboDojo/Rigid/coin/00000/object.usda",
+        "4f43ffc13735455df3ca293f62ace16bf79d891140817aa29247826dba5a76d5",
+        "graspable_object",
+        ((-0.01425, -0.01425, 0), (0.01425, 0.01425, 0.00194075)),
+        dynamic=True,
+        grasp=(-0.013, 0, 0.000970375),
+    ),
+    "robodojo:coin_slot": AssetDefinition(
+        "coin_slot",
+        "https://huggingface.co/datasets/RoboDojo-Benchmark/RoboDojo",
+        "a14409d7fae673c00499e01fd88b4457df6351b1",
+        "RoboDojo/Assets/Object/RoboDojo/Geometry/vertical_coin_stand/00000/fixed.usda",
+        "1a7f60e623d4fde21773c92a721ae59e0c9e995641120f07e48a31181ba9d4ac",
+        "insertion_fixture",
+        ((-0.01606594, -0.00554018, -0.00856527), (0.01603406, 0.00556828, 0.00853472)),
+        dynamic=False,
+        grasp=None,
+    ),
     "robodojo:mouse": AssetDefinition(
         "mouse",
         "https://huggingface.co/datasets/RoboDojo-Benchmark/RoboDojo",

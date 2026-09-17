@@ -1,0 +1,8 @@
+task: ../tasks/lift_object.yaml
+deployment: ../deployments/dual_panda.yaml
+scene: ../scenes/tabletop_coin_slots.yaml
+role_bindings:
+  target_object: coin
+arm_roles:
+  manipulator: right
+max_steps: 450

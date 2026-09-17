@@ -54,6 +54,41 @@ def main():
                     "camera_videos",
                 )
             }
+            if manifest["spec"]["collection"]["task"]["id"] == "insert_coin":
+                from loom_env.data.episodes import EpisodeReader
+                from loom_env.tasks import create_task
+
+                with EpisodeReader(args.path) as reader:
+                    task = create_task(reader.spec.collection)
+                    samples = [
+                        task.metrics(reader.world_state(k))
+                        for k in range(len(reader) + 1)
+                    ]
+                    task.reset(reader.world_state(0))
+                    outcome = None
+                    for k in range(1, len(reader) + 1):
+                        status = task.update(
+                            reader.world_state(k),
+                            reader.spec.collection.deployment.control_dt,
+                        )
+                        if status.outcome is not None:
+                            outcome = {
+                                "step": k,
+                                "code": status.outcome.code,
+                                "reason": status.outcome.reason,
+                            }
+                            break
+                    result["insertion_metrics"] = {
+                        "final": samples[-1],
+                        "max_source_clearance_m": max(
+                            m["source_clearance"] for m in samples
+                        ),
+                        "grasped_samples": sum(m["grasped"] for m in samples),
+                        "lifted": task.lifted,
+                        "approached": task.approached,
+                        "inserted_held": task.inserted_held,
+                        "recomputed_outcome": outcome,
+                    }
             if manifest["spec"]["collection"]["task"]["id"] == "handover_object":
                 import numpy as np
 

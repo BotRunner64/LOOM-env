@@ -1,0 +1,17 @@
+id: insert_coin
+instruction: 从{source_fixture}取出{target_object}，插入{target_fixture}并松手。
+roles:
+  target_object: graspable_object
+  source_fixture: insertion_fixture
+  target_fixture: insertion_fixture
+required_capabilities: [grasp, place]
+parameters:
+  hold_time: 0.25
+  failure_drop: 0.05
+  depth: 0.010
+  max_depth: 0.0175
+  along_tolerance: 0.0015
+  across_tolerance: 0.0004
+  angle_tolerance: 0.03490658503988659
+  lift_clearance: 0.015
+  contact_force: 0.02

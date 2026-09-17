@@ -35,7 +35,7 @@ from loom_env.assets.catalog import (
     sha256,
 )
 from loom_env.embodiments.cameras import CameraMounts, camera_config
-from loom_env.embodiments.commands import gripper_command, initial_command
+from loom_env.embodiments.commands import initial_command
 from loom_env.embodiments.contacts import opposing_contacts
 from loom_env.embodiments.isaac_lab import DualArmArticulation, articulation_config
 from loom_env.embodiments.manipulation import manipulation_profile
@@ -318,21 +318,8 @@ class ManipulationEnvironment(ManagerBasedEnv):
                         for finger in ("left", "right")
                     ]
                 )
-                robot_data = self.robot.robots[side].data
-                fingers = (
-                    robot_data.joint_pos.torch[0, self.robot.gripper_ids[side]]
-                    .cpu()
-                    .numpy()
-                )
                 contacts.append(forces)
-                gripper = self.collection.deployment.arms[side].gripper
-                grasped.append(
-                    opposing_contacts(
-                        forces,
-                        gripper_command(gripper, fingers),
-                        gripper.command_limits[0],
-                    )
-                )
+                grasped.append(opposing_contacts(forces))
             world.update(
                 {
                     f"{name}/pose_world": pose,

@@ -39,7 +39,7 @@ def workspace(scene):
         if obj["category"] != asset.category:
             raise ValueError(f"Asset category mismatch: {name}")
         required = {"asset", "category", "description", "pose", "static"}
-        optional = {"position_min", "position_max"}
+        optional = {"position_min", "position_max", "initial_fixture"}
         if set(obj) - required - optional or not required <= set(obj):
             raise ValueError(f"Unsupported scene object fields: {name}")
         pose(obj["pose"])
@@ -67,6 +67,22 @@ def workspace(scene):
             hi = np.array(vector(obj["position_max"], 2, "position_max"))
             if obj["static"] or np.any(hi < lo):
                 raise ValueError("Invalid sampling range")
+        if "initial_fixture" in obj:
+            fixture_name = obj["initial_fixture"]
+            fixture = (
+                scene.objects.get(fixture_name)
+                if isinstance(fixture_name, str)
+                else None
+            )
+            if (
+                obj["static"]
+                or fixture is None
+                or fixture_name == name
+                or not fixture["static"]
+                or fixture["category"] in {"workspace", "target_region"}
+                or "position_min" in obj
+            ):
+                raise ValueError(f"Invalid fixed initial fixture: {name}")
         if obj["static"] == asset.dynamic:
             raise ValueError(f"Scene cannot override source rigid-body mode: {name}")
     if len(supports) != 1:
@@ -97,12 +113,19 @@ def sample_objects(scene, seed):
                 raise ValueError(f"Object extends outside workspace: {name}")
             if not -0.0001 <= lower[2] <= 0.01:
                 raise ValueError(f"Object is not supported by workspace: {name}")
+            fixture_name = obj.get("initial_fixture")
+            if fixture_name is not None:
+                a, b = next((a, b) for n, a, b in occupied if n == fixture_name)
+                if np.any(lower[:2] < a) or np.any(upper[:2] > b):
+                    raise ValueError(f"Object lies outside initial fixture: {name}")
             if asset.category == "target_region" or all(
-                np.any(upper[:2] + 0.02 < a) or np.any(lower[:2] - 0.02 > b)
-                for a, b in occupied
+                n == fixture_name
+                or np.any(upper[:2] + 0.02 < a)
+                or np.any(lower[:2] - 0.02 > b)
+                for n, a, b in occupied
             ):
                 if asset.category != "target_region":
-                    occupied.append((lower[:2].copy(), upper[:2].copy()))
+                    occupied.append((name, lower[:2].copy(), upper[:2].copy()))
                 poses[name] = transform(frame, local)
                 break
         else:

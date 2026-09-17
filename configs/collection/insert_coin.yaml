@@ -1,0 +1,10 @@
+task: ../tasks/insert_coin.yaml
+deployment: ../deployments/dual_panda.yaml
+scene: ../scenes/tabletop_coin_slots.yaml
+role_bindings:
+  target_object: coin
+  source_fixture: source_slot
+  target_fixture: target_slot
+arm_roles:
+  manipulator: right
+max_steps: 900

@@ -1,6 +1,7 @@
 """Explicit task factories; no simulator or expert dependency."""
 
 from .handover import HandoverTask
+from .insertion import CoinInsertionTask
 from .lift import LiftTask
 from .place import PlaceTask
 from .push import PushTask
@@ -8,6 +9,7 @@ from .push_region import PushIntoRegionTask
 from .sweep import SweepTask
 
 TASKS = {
+    "insert_coin": CoinInsertionTask,
     "put_object_in_container": PlaceTask,
     "lift_object": LiftTask,
     "push_object": PushTask,

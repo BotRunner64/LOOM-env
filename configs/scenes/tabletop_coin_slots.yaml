@@ -1,0 +1,30 @@
+id: tabletop_coin_slots
+objects:
+  table:
+    asset: maniskill:table
+    category: workspace
+    description: 木桌
+    static: true
+    pose: [0, 0, 0, 0, 0, 0, 1]
+  source_slot:
+    asset: robodojo:coin_slot
+    category: insertion_fixture
+    description: 起始硬币支架
+    static: true
+    pose: [-0.06, -0.20, 0.00856527, 0, 0, 0.7071067811865476, 0.7071067811865476]
+  target_slot:
+    asset: robodojo:coin_slot
+    category: insertion_fixture
+    description: 目标硬币槽
+    static: true
+    pose: [0.10, -0.20, 0.00856527, 0, 0, 0.7071067811865476, 0.7071067811865476]
+  coin:
+    asset: robodojo:coin
+    category: graspable_object
+    initial_fixture: source_slot
+    description: 金色硬币
+    static: false
+    pose: [-0.060984425, -0.20001594, 0.01555, 0, 0.7071067811865476, 0, 0.7071067811865476]
+parameters:
+  workspace_pose: [0.45, 0, 0.75, 0, 0, 0, 1]
+  workspace_size: [0.96, 1.9]
