@@ -77,11 +77,69 @@ python scripts/check_scene_assets.py --collection configs/collection/handover.ya
 
 **新增任务：** 增加任务配置与状态判定类，在 `tasks/__init__.py` 显式注册。已有环境输出所有动态物体位姿、速度和两臂接触证据，以及容器区域；任务通过角色绑定读取目标实例。不同动作流程另加专家并在 `runtime/build.py` 注册，Runner 和存储协议无需修改。
 
-当前工作区限定为水平平面，采样只覆盖受支撑且彼此分离的实体物体。固定 `target_region` 可与物体在 XY 上重叠，使物体能进入目标；它仍必须位于工作区内。目标区域的可见几何、碰撞与任务边界来自同一源定义：餐垫碰撞导出为同尺寸规划网格，无碰撞标线导出空规划网格。关节物体、堆叠初态、非矩形功能区域需要对应的新物理状态和判据，应在具体任务要求出现时实现。
+当前工作区限定为水平平面，采样只覆盖受支撑且彼此分离的实体物体。固定 `target_region` 可与物体在 XY 上重叠，使物体能进入目标；它仍必须位于工作区内。目标区域的可见几何、碰撞与任务边界来自同一源定义：餐垫碰撞导出为同尺寸规划网格，无碰撞标线导出空规划网格。固定底座笔记本已补齐单铰链状态、重置和任务判据，见[开盖说明](implementation.md#固定底座笔记本开盖)；其他关节类型、堆叠初态、非矩形功能区域仍需按具体任务实现。
 
 ## 全库 USD 定义与检查
 
-本地 RoboDojo 集合保留 459 个物体，覆盖 `Rigid`、`Geometry` 和 `Clutter`；对应 USD 定义位于 [`configs/assets/robodojo/`](../configs/assets/robodojo/)。版本固定为 `a14409d7fae673c00499e01fd88b4457df6351b1`。复制入口直接按这些定义定位源几何、检查哈希，从 USD 测量尺寸、检查物理属性，不再读取外部属性表。
+### 上游原始资产与任务资产的区别
+
+`.cache/assets/robodojo/` 是经过筛选并安装 LOOM USD 定义的物体库，不代表 RoboDojo 上游的全部资产。完整上游快照单独存放在 `.cache/assets/robodojo-source/Assets/`，保留原始文件，不覆盖已接入任务的物理定义。原始 metadata 仅作为上游文件归档，不作为 LOOM 运行时的物理参数来源。
+
+当前固定版本的上游包含 731 个 `object.usdz`：Rigid 466、Clutter 193、Geometry 49、Articulation 11、Garment 6、Fluid 4、Dynamic 2。Articulation 的 11 款分为笔记本电脑 4 款、烤面包机 4 款、弹簧按钮 2 款、蛋盒 1 款；`Geometry/drawer/00000` 不在该类别中；本次直接检查源 USD 确认它只有 1 个刚体、没有 PhysicsJoint，因此不是可开合的关节抽屉。
+
+完整 `Assets/` 约 38.4 GiB，还包括材质、房间、机器人、传感器、布局与轨迹文件。下载不代表物理属性合格或已接入任务。尤其是关节物体，必须另外核对关节、碰撞、质量和材质，并补齐环境中的状态、重置和重放支持。
+
+复现下载：从仓库根目录激活 `loom-env`，确保环境已安装 `huggingface_hub`、可访问 Hugging Face，并预留至少 40 GiB 可用空间。本次原始快照固定到下述 revision；与任务库旧 revision 相比，仅 165 个布局 JSON 发生变化，物体和材质文件相同。旧 revision 的部分布局文件在上游返回 HTTP 403，因此原始归档使用完整可获取的新快照，现有任务版本保持不变：
+
+```bash
+python - <<'PY'
+from huggingface_hub import snapshot_download
+
+snapshot_download(
+    repo_id="RoboDojo-Benchmark/RoboDojo",
+    repo_type="dataset",
+    revision="91f76c28d93dd20c5fa46ce6a5a1d96a4f384acd",
+    allow_patterns=["Assets/**"],
+    local_dir=".cache/assets/robodojo-source",
+    max_workers=8,
+)
+PY
+```
+
+该标准入口可重复运行以续传。首次本机下载另保存 `source-files.json`、`download-manifest.json` 和 `download.log`，按远端 LFS SHA-256 或 Git blob SHA-1 核验每个文件；查看清单的 `complete` 和 `failures` 判断下载是否完成，不能只看目录存在。网络失败先检查代理及日志，重试时保留已经完成的文件。所有大文件和本机清单均位于 Git 忽略目录。
+
+### 关节物体候选收录
+
+已将全部 11 款关节候选的轻量 USD 入口收录到 [`configs/assets/robodojo/Articulation/`](../configs/assets/robodojo/Articulation/)。每个 `object.usda` 相对引用同目录的 `object.usdz`，并在 `customLayerData` 固定源 revision 和 SHA-256；仅包装入口，不修改源质量、材质、关节或驱动。大型几何和纹理安装在被 Git 忽略的 `.cache/assets/robodojo/Articulation/`，合计约 27 MiB。
+
+| 类型 | 型号目录 | 每款刚体数 | 每款活动关节数 |
+| --- | --- | --- | --- |
+| `SpringButton` | `00002`、`00003` | 2 | 1 个移动关节 |
+| `egg_holder` | `00000` | 2 | 1 个旋转关节 |
+| `laptop` | `00000`–`00003` | 2 | 1 个旋转关节 |
+| `toaster` | `00000` | 4 | 1 个旋转、2 个移动关节 |
+| `toaster` | `00001` | 3 | 1 个旋转、1 个移动关节 |
+| `toaster` | `00002` | 6 | 1 个旋转、4 个移动关节 |
+| `toaster` | `00004` | 4 | 3 个移动关节 |
+
+以上计数来自 USD 定义，不表示已验证 PhysX 中的有效自由度。11 款均至少有一个刚体缺少显式正质量，全部保持 `pending`；质量为 0 表示没有提供项目要求的显式正质量，不能据此断言源资产在 PhysX 中质量为零。未从外部 metadata 补值，也未修改固定底座设定。关节拓扑、驱动、材质完整性及实际运动仍需后续审查；原始候选保持待处理；其中 `laptop/00000` 已另建 `fixed.usda`，固化源求解器质量并固定底座，作为 `robodojo:laptop_fixed` 接入[开盖任务](implementation.md#固定底座笔记本开盖)。不将原始 11 款全部标为可用。
+
+安装和检查继续使用已有入口。从仓库根目录激活 `loom-env`，先按上文下载源快照，再执行（无需 GPU）：
+
+```bash
+python scripts/copy_robodojo_assets.py \
+  --source-root .cache/assets/robodojo-source/Assets/Object/RoboDojo
+python scripts/check_asset_library.py \
+  --output outputs/asset-physics/articulation-import-audit.json
+```
+
+安装覆盖全部 470 个本地 RoboDojo 入口（459 个原有物体及 11 个关节候选），相同几何复用，源与目标必须是独立目录。安装预期 `dependency_issues=0 copy_failures=0`；每项 revision、校验值、依赖结果和关节清单保存在 `.cache/assets/robodojo/manifest.json`。Isaac Sim 提供的标准 MDL 模块在报告中单列，不要求复制到模型目录。
+
+候选收录时全库审查结果为 `USD_READY 478 PENDING 11`（另含 Isaac Sim 和已准备任务入口）；总数随任务资产变化；接入固定底座笔记本后为 `USD_READY 479 PENDING 11`，原始候选仍保持待处理。检查命令因存在待处理候选而返回 1，这是预期结果，不代表复制失败。报告的 `articulation` 列出刚体、关节类型、连接对象、轴、限位及发现的物理缺项；旋转限位单位为 USD 的度，移动限位使用 stage 长度单位。检查尚不覆盖完整关节拓扑或驱动有效性，修复质量也不自动成为已验收任务资产。源几何哈希不符时先核对快照版本；缺材质时查看清单中的 `unresolved_dependencies`。
+
+### 单刚体物体库
+
+本地 RoboDojo 的单刚体集合保留 459 个物体，覆盖 `Rigid`、`Geometry` 和 `Clutter`；对应 USD 定义位于 [`configs/assets/robodojo/`](../configs/assets/robodojo/)。版本固定为 `a14409d7fae673c00499e01fd88b4457df6351b1`。复制入口直接按这些定义定位源几何、检查哈希，从 USD 测量尺寸、检查物理属性，不再读取外部属性表。
 
 在仓库根目录激活 `loom-env`，从上游几何目录安装至本地缓存：
 

@@ -253,7 +253,7 @@ schema 1（RGB 在 HDF5 内）不由当前读取器兼容，已有文件不会�
 
 六类双臂部署及适用布局见[本体说明](embodiments.md#抓放录制)。切换部署时需要考虑臂长与目标可达范围，不能假定同一布局适用于所有本体。重放要求使用与轨迹匹配的配置、代码和资产版本。
 
-关节物体、双臂协作、通用前置条件、异构并行和 Context 配对尚未完成。
+关节物体已完成固定底座笔记本的单铰链开盖案例，见下文；通用多关节物体、双臂协作、通用前置条件、异构并行和 Context 配对尚未完成。
 
 ## 如何判断与排查
 
@@ -657,3 +657,55 @@ python scripts/inspect_data.py episode outputs/coin-insertion/episodes/insert-sp
 `tea-baseline` 完成全部交接动作，700 步超时。运行时纸包质量 0.45 kg、各碰撞形状摩擦 0.42，Panda 各形状摩擦 0.5，未发现物体材料漏加载。`python outputs/grasp-investigation/analyze.py` 直接比较轨迹的物体到 TCP 变换，生成 `tea-baseline-analysis.json`：递出首次抬升（121→173）相对转动 10.11°、原点相对位移 9.70 mm；173→280 基本保持不变。接收独立持有（342→700）相对转动约 0.00187°、位移约 0.00554 mm，双指目标接触力范数约 46 N。因此不能把整个超时回合概括为持续滑落。末段另有速度信号待查：轨迹角速度约 0.432 rad/s，但相邻 50 ms 位姿差分约 1e-5 rad/s；尚未区分子步运动、求解器速度与位姿修正或状态读取问题，不以差分替代成功判据。
 
 参考实现差异：本地 ManiSkill `mani_skill/agents/robots/panda/panda.py` 为 Panda 手指设置摩擦 2.0、patch_radius/min_patch_radius=0.1，并将夹爪位置目标下限设为 -0.01 m，注释明确用于薄物体夹持力。本项目闭合目标为 0，不能声称与它相同。RLBench `rlbench/backend/task.py::register_graspable_objects` 明确说明稳定抓取使用 PyRep 将物体作为夹爪子对象附着，不能据此推断纯接触抓取不会滑动。真机 Franka 的 grasp(width, speed, force, ...) 可指定抓持力，区别于 move(width, speed)；当前位置 PD 闭合尚未实现等价的 grasp 控制语义。官方接口见 https://support.franka.de/docs/franka_ros.html ，官方仿真控制说明见 https://frankarobotics.github.io/docs/doc/franka_ros/franka_gazebo/doc/index.html 。这些差异提供排查方向，不是本案根因已全部确定的证据。
+
+## 固定底座笔记本开盖
+
+`open_laptop` 是首个单旋转关节 expert，使用 Panda 右臂抓住屏幕上边缘，将半开的屏幕打开后松开夹爪。当前默认初态为 35°，目标为 95°；这不是从完全闭合处探入夹爪的任务，也尚未支持自由底座、抽屉、弹簧按钮或任意多关节物体。左臂保持初态。
+
+### 物理定义与接口
+
+任务资产 `robodojo:laptop_fixed` 使用 `Articulation/laptop/00000/fixed.usda`，相对引用原始候选 `object.usda` 和几何包。固定约束、质量都在 USD 内定义，运行时不补物理属性。两 link 的显式质量取自源 USD 材料密度与原碰撞在 PhysX 中计算的结果：底座约 0.250259 kg、屏幕约 0.244225 kg；这是保留源仿真质量，不是实物称量。源碰撞、摩擦、恢复系数和铰链驱动保持不变，只有底座固定约束、显式质量和缺失的 MaterialBindingAPI 声明被加入。准备及加载检查各 link 的物理材质和质量，GPU 中的质量再次与 USD 对照。
+
+`ArticulatedAssetDefinition` 只记录根 link、活动 link、关节名称和屏幕局部抓点。关节轴、连接、限位、关节局部坐标系从 USD 读取。准备时生成各 link 局部坐标下的碰撞网格，cuRobo 按实测 link 位姿更新；接触阶段只允许接触屏幕，底座、桌子、另一臂、自碰撞与机器人限位继续参与检查。该范围是固定基座、两 link、一个旋转关节，不能直接用来加载多关节烤面包机。
+
+场景的 `joint_positions` 使用具名关节与弧度；本资产 q=0 为闭合端，负 q 为打开方向，USD 源限位是 [-110°, 0°]。环境按初始角度重置并检查到位，完整原生场景快照包含物体的关节位置和速度。每帧真值新增 `laptop/joints/<joint>/position`、`velocity`，以及 `laptop/links/<body>/pose_world`、`velocity_world`、`center_of_mass_local`、`finger_contact_forces_world`。这些是 expert 可读取的仿真真值，不会自动加入策略观测。重放比较覆盖物体关节角度和两个 link 的位姿，动作仍只控制机器人。
+
+专家位于 `experts/articulation.py`，沿用 `reset/act`：规划预接近及抓点 → 闭合到实测双指相向接触 → 从实测抓持末端位姿沿铰链圆弧连续运动 → 松开。平行夹爪采用对称翻转后的朝向，避免开盖过程中第六关节越界。参考角速度为 15°/s；当实测角度距目标小于 3° 时松开，不把参考轨迹完成当作屏幕到位。任务判据在 `tasks/articulation.py` 独立执行：曾在屏幕上出现双指相向接触、关节位于目标 ±15°、两指在屏幕上的接触力均低于 0.1 N，并持续 0.3 s。成功后结束记录，不要求机器人撤离或屏幕速度接近零。
+
+### 运行和检查
+
+工作目录为仓库根目录，激活 `loom-env`，按[环境说明](environment.md)配置 GPU、EULA。先按[资产收录说明](scene-assets.md#关节物体候选收录)安装几何和 USD；`source-links` 必须指向该已安装物体库，且已有准备好的桌子和 Panda。安装脚本会同时安装 `fixed.usda`。随后：
+
+```bash
+python scripts/prepare_assets.py scene \
+  --source-root .cache/assets/source-links --scene-asset robodojo:laptop_fixed
+python scripts/check_scene_assets.py \
+  --collection configs/collection/open_laptop.yaml \
+  --output-dir outputs/laptop/asset-health
+python scripts/collect.py --collection configs/collection/open_laptop.yaml \
+  --output-dir outputs/laptop --episode-id open-01
+python scripts/replay_episode.py outputs/laptop/episodes/open-01 \
+  --output-dir outputs/laptop/replay
+```
+
+采集按项目约定在沙箱外运行，回合 ID 不可复用。健康检查预期 `passed: true`；采集预期 `outcome.code=success`，自动打印 episode、三路视频和拼接视频路径；重放的 comparison JSON 预期 `passed: true`。查看视频时核对底座未移动、夹爪真实夹住屏幕并将其打开、松开后屏幕仍在目标区间。数据的 T 个动作对应 T+1 帧，关节曲线可从上述 world-state 键读取。
+
+少量布局／初态变化使用同一 expert：
+
+```bash
+python scripts/collect.py --collection configs/collection/open_laptop.yaml \
+  --scene configs/scenes/tabletop_laptop_shifted.yaml \
+  --output-dir outputs/laptop --episode-id open-shifted
+```
+
+此变体改变 XY 位置、偏航 5°，初始开角改为 45°。没有改质量、摩擦或任务判据。
+
+### 本机验证与限制
+
+`outputs/articulation-development/episodes/laptop-06` 在 210 步（10.5 s）完成，从 35° 打开至约 93.15°，结束时两指接触力为零。三路视频和拼接预览在对应 `cameras/` 与 `videos/laptop-06.mp4`，关键帧为 `laptop-06-keyframes.png`，角度和接触力曲线为 `laptop-06-measurements.png`。物理重放 `replay/laptop-06-replay-comparison.json` 通过，211 帧的机器人关节、物体关节和 link 位姿测量误差均为 0；该一致性只针对这次记录与当前环境。资产健康检查位于 `asset-health/validation.json`，USD 物理值和求解器质量均通过核对。
+
+布局／初态变体 `laptop-shifted` 在 178 步（8.9 s）完成，从 45° 打开至约 92.93°，视频在 `videos/laptop-shifted.mp4`；该变体尚未单独做物理重放。原有 `pick_place` 回归仍在 205 步成功，产物位于 `regression/`。
+
+失败过程也保留在同目录：25° 初态的两次最终抓点规划失败；35° 初态已能抓住屏幕，但逐帧重建标注抓点的参考会使其缓慢合上，最终碰撞检查拒绝；改为实测抓持位姿的连续圆弧后可打开至约 66°，原腕姿态触及第六关节限位。最终使用夹爪的对称朝向通过，没有删除碰撞或限位检查。首版依赖足够的初始开角与可达布局，不承诺任意安装位置、完全闭合开盖或其他本体。
+
+源薄网格仍可能触发 PhysX GPU 碰撞烹饪回退警告；源铰链是被动环境物体，Isaac Lab 的“0 != 1 actuators”提示为未配置机器人式关节执行器，不应为了消除提示给屏幕添加位置驱动。实际接触效果以视频、关节与接触力记录为准。若失败，先查看回合事件和日志中失败阶段；初态不稳定看 `object_joint_errors`，规划失败看布局、抓点和机器人可达性，关节越界看实际机器人关节曲线。

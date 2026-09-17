@@ -35,8 +35,34 @@ class AssetDefinition:
     source_translation: tuple[float, float, float] = (0.0, 0.0, 0.0)
 
 
+@dataclass(frozen=True, kw_only=True)
+class ArticulatedAssetDefinition(AssetDefinition):
+    root_body: str
+    moving_body: str
+    joint: str
+    contact: tuple[float, float, float]
+
+
+def is_articulated(asset):
+    return isinstance(asset, ArticulatedAssetDefinition)
+
+
 TABLE_SCALE = 0.75 / 0.5255104303359985
 ASSETS = {
+    "robodojo:laptop_fixed": ArticulatedAssetDefinition(
+        "laptop_fixed",
+        "https://huggingface.co/datasets/RoboDojo-Benchmark/RoboDojo",
+        "91f76c28d93dd20c5fa46ce6a5a1d96a4f384acd",
+        "RoboDojo/Assets/Object/RoboDojo/Articulation/laptop/00000/fixed.usda",
+        "002eba87902c3ac677fe0876af5e043b3fa6808a2c4543d16d3b258ffe285e1f",
+        "articulated_object",
+        ((-0.089634504, -0.078206758, 0.0), (0.0897175, 0.09018646, 0.12081894)),
+        dynamic=True,
+        root_body="E_body_1",
+        moving_body="E_displayer_5",
+        joint="RevoluteJoint_computer_9_up",
+        contact=(0.069, 0.0, 0.113),
+    ),
     "robodojo:coin": AssetDefinition(
         "coin",
         "https://huggingface.co/datasets/RoboDojo-Benchmark/RoboDojo",

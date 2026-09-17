@@ -1,0 +1,19 @@
+id: tabletop_laptop_shifted
+objects:
+  table:
+    asset: maniskill:table
+    category: workspace
+    description: 木质餐桌
+    static: true
+    pose: [0, 0, 0, 0, 0, 0, 1]
+  laptop:
+    asset: robodojo:laptop_fixed
+    category: articulated_object
+    description: 固定底座的半开笔记本电脑
+    static: false
+    pose: [0.10, -0.24, 0, 0, 0, -0.6755902076156602, 0.737277336810124]
+    joint_positions:
+      RevoluteJoint_computer_9_up: -0.7853981633974483
+parameters:
+  workspace_pose: [0.45, 0, 0.75, 0, 0, 0, 1]
+  workspace_size: [0.96, 1.9]

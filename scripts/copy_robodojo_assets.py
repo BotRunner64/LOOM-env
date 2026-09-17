@@ -22,7 +22,7 @@ def digest(path):
 def inventory(source):
     from pxr import Sdf, Usd, UsdGeom, UsdPhysics
 
-    from loom_env.assets.prepare import physics_properties
+    from loom_env.assets.prepare import articulation_inventory, physics_properties
 
     selected, excluded = [], []
     for definition in sorted(
@@ -36,6 +36,9 @@ def inventory(source):
             continue
         layer = Sdf.Layer.CreateAnonymous()
         layer.ImportFromString(definition.read_text())
+        row["revision"] = layer.customLayerData.get(
+            "source_revision", "a14409d7fae673c00499e01fd88b4457df6351b1"
+        )
         if digest(raw) != layer.customLayerData["source_sha256"]:
             raise ValueError(f"Source geometry checksum mismatch: {raw}")
         layer.GetPrimAtPath("/Asset").referenceList.prependedItems = [
@@ -51,6 +54,14 @@ def inventory(source):
             float(x) * UsdGeom.GetStageMetersPerUnit(stage) for x in bounds.GetSize()
         ]
         row["dimensions_m"] = dims
+        if relative.parts[0] == "Articulation":
+            row.update(
+                physics_status="pending",
+                physics_issue="Articulated candidate; task admission not validated",
+                articulation=articulation_inventory(stage),
+            )
+            selected.append(row)
+            continue
         try:
             root = stage.GetDefaultPrim()
             bodies = [p for p in stage.Traverse() if p.HasAPI(UsdPhysics.RigidBodyAPI)]
@@ -113,14 +124,12 @@ def main():
         or source.is_relative_to(target)
     ):
         raise ValueError("Source and destination must be separate directories")
-    revision = "a14409d7fae673c00499e01fd88b4457df6351b1"
     selected, excluded = inventory(source)
     if not selected:
-        raise ValueError("No tabletop assets found")
+        raise ValueError("No object assets found")
     target.mkdir(parents=True, exist_ok=True)
     manifest = {
         "source": "https://huggingface.co/datasets/RoboDojo-Benchmark/RoboDojo",
-        "revision": revision,
         "source_root": str(source),
         "status": "copying",
         "selection": "configs/assets/robodojo USD definitions",

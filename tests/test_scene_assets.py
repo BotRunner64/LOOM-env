@@ -293,3 +293,34 @@ def test_library_checks_child_body_physics(tmp_path, missing):
     assert result["status"] == ("ready" if missing is None else "pending")
     if missing is None:
         assert result["physics"]["mass_kg"] == pytest.approx(0.02)
+
+
+def test_articulated_candidate_inventory_is_not_task_admission(tmp_path):
+    import json
+    import runpy
+    from pathlib import Path
+
+    from pxr import Usd, UsdGeom, UsdPhysics
+
+    inspect_asset = runpy.run_path(
+        str(Path(__file__).resolve().parents[1] / "scripts/check_asset_library.py")
+    )["inspect_asset"]
+    path = tmp_path / "articulated.usda"
+    stage = Usd.Stage.CreateNew(str(path))
+    stage.SetDefaultPrim(UsdGeom.Xform.Define(stage, "/Object").GetPrim())
+    for name in ("Base", "Lid"):
+        UsdPhysics.RigidBodyAPI.Apply(
+            UsdGeom.Cube.Define(stage, f"/Object/{name}").GetPrim()
+        )
+    joint = UsdPhysics.RevoluteJoint.Define(stage, "/Object/Hinge")
+    joint.CreateBody0Rel().SetTargets(["/Object/Base"])
+    joint.CreateBody1Rel().SetTargets(["/Object/Lid"])
+    stage.GetRootLayer().Save()
+    result = inspect_asset(path, dynamic=True)
+    assert result["status"] == "pending"
+    report = result["articulation"]
+    assert len(report["bodies"]) == 2
+    assert len(report["issues"]) == 2
+    assert all("mass" in issue for issue in report["issues"])
+    assert report["joints"][0]["body1"] == ["/Object/Lid"]
+    json.dumps(result, allow_nan=False)

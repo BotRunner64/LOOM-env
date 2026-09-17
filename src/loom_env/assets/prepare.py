@@ -10,7 +10,13 @@ from pathlib import Path
 
 import numpy as np
 
-from .catalog import ASSETS, PREPARATION_VERSION, prepared_directory, sha256
+from .catalog import (
+    ASSETS,
+    PREPARATION_VERSION,
+    is_articulated,
+    prepared_directory,
+    sha256,
+)
 
 
 def physics_properties(stage, root=None):
@@ -45,6 +51,54 @@ def physics_properties(stage, root=None):
             a.GetName().removeprefix("physics:"): a.Get() for a in attrs
         }
     return result
+
+
+def articulation_inventory(stage):
+    """Describe candidate USD physics; this is not articulation task admission."""
+    from pxr import Usd, UsdPhysics
+
+    prims = list(Usd.PrimRange(stage.GetDefaultPrim(), Usd.TraverseInstanceProxies()))
+    bodies, joints, issues = [], [], []
+    for prim in prims:
+        path = str(prim.GetPath())
+        if prim.HasAPI(UsdPhysics.RigidBodyAPI):
+            body = {"path": path}
+            if not UsdPhysics.RigidBodyAPI(prim).GetRigidBodyEnabledAttr().Get():
+                issues.append(f"Disabled rigid body: {path}")
+            try:
+                body["physics"] = physics_properties(stage, root=prim)
+                if not body["physics"]["materials"]:
+                    issues.append(f"No collision: {path}")
+            except ValueError as error:
+                issues.append(f"{path}: {error}")
+            bodies.append(body)
+        if prim.IsA(UsdPhysics.Joint):
+            joint = UsdPhysics.Joint(prim)
+            row = {
+                "path": path,
+                "type": prim.GetTypeName(),
+                "body0": [str(p) for p in joint.GetBody0Rel().GetTargets()],
+                "body1": [str(p) for p in joint.GetBody1Rel().GetTargets()],
+                "enabled": joint.GetJointEnabledAttr().Get(),
+            }
+            for name in ("axis", "lowerLimit", "upperLimit"):
+                attr = prim.GetAttribute(f"physics:{name}")
+                if attr:
+                    value = attr.Get()
+                    # USD supports unbounded joints; keep reports strict JSON.
+                    row[name] = (
+                        str(value)
+                        if isinstance(value, float) and not np.isfinite(value)
+                        else value
+                    )
+            joints.append(row)
+    return {
+        "bodies": bodies,
+        "joints": joints,
+        "issues": issues,
+        "limit_units": "USD degrees for revolute; stage length units for prismatic",
+        "scope": "Source inventory only; topology, drives and simulation unvalidated",
+    }
 
 
 def source_physics(stage):
@@ -181,8 +235,12 @@ def prepare_scene_assets(asset_root, source_root, asset_ids=None):
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(member, target)
         source_stage = Usd.Stage.Open(str(local))
-        geometry_hash = source_stage.GetRootLayer().customLayerData.get("source_sha256")
-        if geometry_hash and sha256(directory / "object.usdz") != geometry_hash:
+        geometry_hashes = {
+            layer.customLayerData["source_sha256"]
+            for layer in source_stage.GetUsedLayers()
+            if "source_sha256" in layer.customLayerData
+        }
+        if geometry_hashes and geometry_hashes != {sha256(directory / "object.usdz")}:
             raise ValueError(f"Source geometry checksum mismatch: {asset_id}")
         if not mesh_only and (
             UsdGeom.GetStageUpAxis(source_stage) != "Z"
@@ -219,7 +277,10 @@ def prepare_scene_assets(asset_root, source_root, asset_ids=None):
             root.HasAPI(UsdPhysics.RigidBodyAPI)
             and UsdPhysics.RigidBodyAPI(root).GetRigidBodyEnabledAttr().Get()
         )
-        if bool(actual_dynamic) != definition.dynamic:
+        if (
+            not is_articulated(definition)
+            and bool(actual_dynamic) != definition.dynamic
+        ):
             raise ValueError(f"Source rigid body differs from inventory: {asset_id}")
         geometry = collision_prims or [
             p for p in stage.Traverse() if p.IsA(UsdGeom.Mesh)
@@ -293,7 +354,12 @@ def prepare_scene_assets(asset_root, source_root, asset_ids=None):
                         bindingStrength="strongerThanDescendants",
                         materialPurpose="physics",
                     )
-        expected_physics = physics_properties(stage)
+        if is_articulated(definition):
+            from .articulation import describe
+
+            expected_physics = describe(stage, definition, directory)
+        else:
+            expected_physics = physics_properties(stage)
         # Resolve relative dependencies from the file-backed layer, not an
         # anonymous stage. Source model bytes remain intact.
         stage.GetRootLayer().Export(str(destination))
@@ -310,7 +376,11 @@ def prepare_scene_assets(asset_root, source_root, asset_ids=None):
         np.savez_compressed(
             directory / "collision.npz", vertices=vertices, faces=triangles
         )
-        if physics_properties(prepared) != expected_physics:
+        if (
+            describe(prepared, definition)
+            if is_articulated(definition)
+            else physics_properties(prepared)
+        ) != expected_physics:
             raise ValueError(
                 f"Cached USD physics differs from prepared definition: {asset_id}"
             )

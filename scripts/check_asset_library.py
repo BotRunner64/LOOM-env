@@ -5,14 +5,14 @@ import argparse
 import json
 from pathlib import Path
 
-from loom_env.assets.catalog import ASSETS, prepared_directory
+from loom_env.assets.catalog import ASSETS, is_articulated, prepared_directory
 from loom_env.assets.isaacsim import ISAACSIM_PROPS
-from loom_env.assets.prepare import physics_properties
+from loom_env.assets.prepare import articulation_inventory, physics_properties
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def inspect_asset(path, dynamic, collision=True):
+def inspect_asset(path, dynamic, collision=True, definition=None):
     from pxr import Tf, Usd, UsdPhysics
 
     try:
@@ -22,6 +22,20 @@ def inspect_asset(path, dynamic, collision=True):
         root = stage.GetDefaultPrim()
         if not root:
             raise ValueError("Missing default prim")
+        if definition is not None and is_articulated(definition):
+            from loom_env.assets.articulation import describe
+
+            return {
+                "status": "ready",
+                "physics": describe(stage, definition),
+                "scope": "USD fixed-hinge checks; simulation requires scene validation",
+            }
+        if any(p.IsA(UsdPhysics.Joint) for p in stage.Traverse()):
+            return {
+                "status": "pending",
+                "reason": "Articulated candidate; task admission not validated",
+                "articulation": articulation_inventory(stage),
+            }
         bodies = [
             p
             for p in Usd.PrimRange(root, Usd.TraverseInstanceProxies())
@@ -70,11 +84,12 @@ def audit(asset_root):
                     definition.dynamic,
                     definition.category != "target_region"
                     or definition.name == "placemat",
+                    definition=definition,
                 ),
             }
         )
     return {
-        "scope": "USD single rigid body (including child prims), explicit mass and bound physics material; simulation behavior requires scene checks",
+        "scope": "Rigid body mass and bound material checks; articulated source inventory remains pending task admission; simulation requires scene checks",
         "ready": sum(r["status"] == "ready" for r in rows),
         "pending": sum(r["status"] == "pending" for r in rows),
         "assets": rows,

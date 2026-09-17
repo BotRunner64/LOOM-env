@@ -30,6 +30,7 @@ from scipy.spatial.transform import Rotation
 from loom_env.assets.catalog import (
     asset_definition,
     collision_mesh,
+    is_articulated,
     load_prepared,
     prepared_directory,
     sha256,
@@ -152,6 +153,17 @@ def policy_signal(env, key):
     )
 
 
+def contact_targets(scene):
+    targets = []
+    for name in dynamic_names(scene):
+        asset = asset_definition(scene.objects[name]["asset"])
+        bodies = (
+            (asset.root_body, asset.moving_body) if is_articulated(asset) else (None,)
+        )
+        targets.extend((name, body) for body in bodies)
+    return targets
+
+
 def environment_config(collection, asset_root):
     candidates = sample_objects(collection.scene, 0)
     scene = InteractiveSceneCfg(num_envs=1, env_spacing=3.0, replicate_physics=False)
@@ -187,8 +199,8 @@ def environment_config(collection, asset_root):
                 ContactSensorCfg(
                     prim_path=f"{prefix}/{side}_robot/{path}",
                     filter_prim_paths_expr=[
-                        f"{prefix}/object_{name}"
-                        for name in dynamic_names(collection.scene)
+                        f"{prefix}/object_{name}" + (f"/{body}" if body else "")
+                        for name, body in contact_targets(collection.scene)
                     ],
                     max_contact_data_count_per_prim=64,
                 ),
@@ -201,6 +213,8 @@ def environment_config(collection, asset_root):
             asset_root,
         )
         others = [n for n in dynamic_names(collection.scene) if n != name]
+        if is_articulated(asset_definition(collection.scene.objects[name]["asset"])):
+            others = []
         if not collection.scene.objects[name]["static"] and others:
             obj_cfg.spawn.activate_contact_sensors = True
             setattr(
@@ -282,6 +296,23 @@ class ManipulationEnvironment(ManagerBasedEnv):
         self.scene.write_data_to_sim()
         self.sim.step(render=False)
         self.scene.update(self.physics_dt)
+        for name in self.object_names:
+            asset = asset_definition(self.collection.scene.objects[name]["asset"])
+            if not is_articulated(asset):
+                continue
+            obj = self.scene[f"object_{name}"]
+            if not obj.is_fixed_base or obj.joint_names != [asset.joint]:
+                raise ValueError("Reviewed object must be a fixed-base single hinge")
+            physics = self.asset_manifests[
+                self.collection.scene.objects[name]["asset"]
+            ]["physics_properties"]
+            masses = [
+                physics["bodies"][n]["physics"]["mass_kg"] for n in obj.body_names
+            ]
+            if not np.allclose(
+                obj.data.body_mass.torch.cpu().numpy(), masses, rtol=1e-5
+            ):
+                raise ValueError("Articulated body mass differs from USD")
 
     def load_managers(self):
         self.robot = DualArmArticulation(
@@ -303,23 +334,58 @@ class ManipulationEnvironment(ManagerBasedEnv):
 
     def world_state(self):
         world = {}
-        for index, name in enumerate(self.object_names):
+        for name in self.object_names:
             data = self.scene[f"object_{name}"].data
             pose = data.root_pose_w.torch[0].cpu().numpy().copy()
             velocity = data.root_vel_w.torch[0].cpu().numpy().copy()
+            asset = asset_definition(self.collection.scene.objects[name]["asset"])
+            targets = contact_targets(self.collection.scene)
+            indices = [i for i, (obj, _) in enumerate(targets) if obj == name]
             contacts, grasped = [], []
+            body_forces = []
             for side in ARMS:
-                forces = np.stack(
+                per_body = np.stack(
                     [
                         self.scene[f"contact_{side}_{finger}"]
-                        .data.force_matrix_w.torch[0, 0, index]
+                        .data.force_matrix_w.torch[0, 0, indices]
                         .cpu()
                         .numpy()
                         for finger in ("left", "right")
                     ]
                 )
+                forces = per_body.sum(axis=1)
                 contacts.append(forces)
-                grasped.append(opposing_contacts(forces))
+                grasped.append(
+                    any(opposing_contacts(per_body[:, i]) for i in range(len(indices)))
+                )
+                body_forces.append(per_body)
+            if is_articulated(asset):
+                obj = self.scene[f"object_{name}"]
+                local = np.array(
+                    self.asset_manifests[self.collection.scene.objects[name]["asset"]][
+                        "physics_properties"
+                    ]["bodies"][asset.root_body]["pose_asset"]
+                )
+                inv = Rotation.from_quat(local[3:]).inv()
+                pose = transform(pose, np.r_[inv.apply(-local[:3]), inv.as_quat()])
+                for i, body in enumerate((asset.root_body, asset.moving_body)):
+                    index = obj.body_names.index(body)
+                    world[f"{name}/links/{body}/pose_world"] = (
+                        data.body_pose_w.torch[0, index].cpu().numpy().copy()
+                    )
+                    world[f"{name}/links/{body}/velocity_world"] = (
+                        data.body_vel_w.torch[0, index].cpu().numpy().copy()
+                    )
+                    world[f"{name}/links/{body}/finger_contact_forces_world"] = (
+                        np.asarray(body_forces)[:, :, i]
+                    )
+                index = obj.joint_names.index(asset.joint)
+                world[f"{name}/joints/{asset.joint}/position"] = np.asarray(
+                    data.joint_pos.torch[0, index].cpu().item()
+                )
+                world[f"{name}/joints/{asset.joint}/velocity"] = np.asarray(
+                    data.joint_vel.torch[0, index].cpu().item()
+                )
             world.update(
                 {
                     f"{name}/pose_world": pose,
@@ -331,8 +397,15 @@ class ManipulationEnvironment(ManagerBasedEnv):
                     f"{name}/finger_contact_forces_world": np.asarray(contacts),
                 }
             )
+            if is_articulated(asset):
+                del world[f"{name}/center_of_mass_local"]
+                for body in (asset.root_body, asset.moving_body):
+                    index = self.scene[f"object_{name}"].body_names.index(body)
+                    world[f"{name}/links/{body}/center_of_mass_local"] = (
+                        data.body_com_pose_b.torch[0, index, :3].cpu().numpy().copy()
+                    )
             others = [n for n in self.object_names if n != name]
-            if others:
+            if others and not is_articulated(asset):
                 forces = (
                     self.scene[f"object_contact_{name}"]
                     .data.force_matrix_w.torch[0, 0]
@@ -420,7 +493,28 @@ class ManipulationEnvironment(ManagerBasedEnv):
         candidates = sample_objects(self.collection.scene, seed)
         for name in self.object_names:
             candidate = candidates[name]
+            asset = asset_definition(self.collection.scene.objects[name]["asset"])
+            if is_articulated(asset):
+                physics = self.asset_manifests[
+                    self.collection.scene.objects[name]["asset"]
+                ]["physics_properties"]
+                candidate = transform(
+                    candidate, physics["bodies"][asset.root_body]["pose_asset"]
+                )
             obj = self.scene[f"object_{name}"]
+            if is_articulated(asset):
+                q = torch.tensor(
+                    [
+                        [
+                            self.collection.scene.objects[name]["joint_positions"][n]
+                            for n in obj.joint_names
+                        ]
+                    ],
+                    device=self.device,
+                )
+                obj.write_joint_state_to_sim_index(
+                    position=q, velocity=torch.zeros_like(q)
+                )
             obj.write_root_pose_to_sim_index(
                 root_pose=torch.tensor(
                     candidate[None],
@@ -457,15 +551,26 @@ class ManipulationEnvironment(ManagerBasedEnv):
             support_errors = {}
             for name in self.object_names:
                 measured = frame.world_state[f"{name}/pose_world"]
-                vertical = Rotation.from_quat(measured[3:]).as_matrix()[2]
+                vertical = Rotation.from_quat(measured[3:].copy()).as_matrix()[2]
                 bottom = (support_vertices[name] @ vertical).min() + measured[2]
                 support_errors[name] = {
                     "xy_m": float(np.linalg.norm(measured[:2] - candidates[name][:2])),
                     "height_m": float(abs(bottom - support[2])),
                 }
-            ready = all(error < 0.003 for error in joint_errors.values()) and all(
-                error["xy_m"] <= 0.005 and error["height_m"] <= 0.003
-                for error in support_errors.values()
+            object_joint_errors = {
+                f"{name}/{joint}": abs(
+                    float(frame.world_state[f"{name}/joints/{joint}/position"]) - q
+                )
+                for name, instance in self.collection.scene.objects.items()
+                for joint, q in instance.get("joint_positions", {}).items()
+            }
+            ready = (
+                all(error < 0.02 for error in object_joint_errors.values())
+                and all(error < 0.003 for error in joint_errors.values())
+                and all(
+                    error["xy_m"] <= 0.005 and error["height_m"] <= 0.003
+                    for error in support_errors.values()
+                )
             )
             ready_steps = ready_steps + 1 if ready else 0
             if ready_steps * self.step_dt >= 0.25:
@@ -474,7 +579,7 @@ class ManipulationEnvironment(ManagerBasedEnv):
             raise RuntimeError(
                 "Candidate did not reach its initial robot/support positions within "
                 f"five seconds: joint_errors_rad={joint_errors}, "
-                f"support_errors={support_errors}"
+                f"support_errors={support_errors}, object_joint_errors={object_joint_errors}"
             )
         state = _tree_map(self.scene.get_state(), lambda v: v.cpu().tolist())
         return EpisodeSpec(

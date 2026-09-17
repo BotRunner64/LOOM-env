@@ -5,7 +5,7 @@ from itertools import product
 import numpy as np
 from scipy.spatial.transform import Rotation
 
-from loom_env.assets.catalog import asset_definition
+from loom_env.assets.catalog import asset_definition, is_articulated
 from loom_env.specs.config import pose, vector
 
 
@@ -39,9 +39,24 @@ def workspace(scene):
         if obj["category"] != asset.category:
             raise ValueError(f"Asset category mismatch: {name}")
         required = {"asset", "category", "description", "pose", "static"}
-        optional = {"position_min", "position_max", "initial_fixture"}
+        optional = {
+            "position_min",
+            "position_max",
+            "initial_fixture",
+            "joint_positions",
+        }
         if set(obj) - required - optional or not required <= set(obj):
             raise ValueError(f"Unsupported scene object fields: {name}")
+        if is_articulated(asset):
+            values = obj.get("joint_positions", {})
+            if set(values) != {asset.joint} or not all(
+                np.isfinite(v) for v in values.values()
+            ):
+                raise ValueError(
+                    "Articulated object needs its named initial joint position in radians"
+                )
+        elif "joint_positions" in obj:
+            raise ValueError("Rigid object cannot have joint positions")
         pose(obj["pose"])
         if type(obj["static"]) is not bool:
             raise ValueError("Object static must be boolean")

@@ -1,0 +1,132 @@
+#usda 1.0
+(
+    customLayerData = {
+        string mass_basis = "PhysX source collision and USD material density, Isaac Sim 6; source-mass.json recorded during development"
+    }
+    defaultPrim = "Asset"
+    metersPerUnit = 1
+    upAxis = "Z"
+)
+
+def Xform "Asset" (
+    prepend apiSchemas = ["PhysicsArticulationRootAPI"]
+    prepend references = @object.usda@
+)
+{
+    over "E_body_1" (
+        delete apiSchemas = ["PhysicsArticulationRootAPI"]
+        prepend apiSchemas = ["PhysicsMassAPI"]
+    )
+    {
+        float physics:mass = 0.25025913
+
+        over "E_Group_2"
+        {
+            over "P_1e5d57b88817687f" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+            }
+
+            over "P_14642a3a360c107f" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+            }
+
+            over "P_5ed99b1c4c47687f" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+            }
+
+            over "touch_pad"
+            {
+                over "touch_pad" (
+                    prepend apiSchemas = ["MaterialBindingAPI"]
+                )
+                {
+                }
+            }
+        }
+
+        over "E_keyboard_3"
+        {
+            over "P_8dde13f8c6c4547f" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+            }
+
+            over "P_7a7cc6daf657687f" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+            }
+
+            over "P_32dc8237d0f0687f" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+            }
+        }
+
+        over "E_foot_mat_4"
+        {
+            over "P_c97dfd96654f687f" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+            }
+        }
+    }
+
+    over "E_displayer_5" (
+        prepend apiSchemas = ["PhysicsMassAPI"]
+    )
+    {
+        float physics:mass = 0.24422549
+
+        over "screen"
+        {
+            over "P_eeb48f6c1dbce87f" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+            }
+        }
+
+        over "lid"
+        {
+            over "P_74e9628836e5b87f" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+            }
+
+            over "P_1b5d16155170687f" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+            }
+
+            over "P_a3edd5af057687f" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+            }
+
+            over "P_d0d77947399b37bf" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+            }
+        }
+    }
+
+    def PhysicsFixedJoint "FixedBase"
+    {
+        rel physics:body1 = </Asset/E_body_1>
+    }
+}
+

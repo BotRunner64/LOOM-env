@@ -15,28 +15,55 @@ from curobo.scene import Cuboid, Mesh, Scene
 from curobo.types import GoalToolPose, JointState, Pose
 from scipy.spatial.transform import Rotation
 
-from loom_env.assets.catalog import asset_definition, collision_mesh
+from loom_env.assets.catalog import (
+    asset_definition,
+    collision_mesh,
+    is_articulated,
+    prepared_directory,
+)
 from loom_env.embodiments.manipulation import manipulation_profile, planner_robot
 from loom_env.runtime.runner import SourceFailure
 
 
 class ArmPlanner:
     def __init__(self, deployment, scene, side, target_object, asset_root):
+        self.asset_root = asset_root
         self.deployment, self.scene, self.side = deployment, scene, side
         self.target_object = target_object
         self.arm = deployment.arms[side]
         self.profile = manipulation_profile(self.arm)
         self.meshes = {}
         for name, obj in scene.objects.items():
-            vertices, faces = collision_mesh(asset_root, obj["asset"])
-            if len(faces) == 0:
-                continue
-            self.meshes[name] = Mesh(
-                name=name,
-                vertices=vertices.tolist(),
-                faces=faces.tolist(),
-                pose=[0, 0, 0, 1, 0, 0, 0],
+            asset = asset_definition(obj["asset"])
+            bodies = (
+                (asset.root_body, asset.moving_body)
+                if is_articulated(asset)
+                else (None,)
             )
+            for body in bodies:
+                key = f"{name}/links/{body}" if body else name
+                if body:
+                    with np.load(
+                        prepared_directory(asset_root, obj["asset"])
+                        / f"collision-{body}.npz"
+                    ) as data:
+                        vertices, faces = data["vertices"], data["faces"]
+                else:
+                    vertices, faces = collision_mesh(asset_root, obj["asset"])
+                if len(faces) == 0:
+                    continue
+                self.meshes[key] = Mesh(
+                    name=key,
+                    vertices=vertices.tolist(),
+                    faces=faces.tolist(),
+                    pose=[0, 0, 0, 1, 0, 0, 0],
+                )
+        asset = asset_definition(scene.objects[target_object]["asset"])
+        self.contact_target = (
+            f"{target_object}/links/{asset.moving_body}"
+            if is_articulated(asset)
+            else target_object
+        )
         self.base = np.asarray(self.arm.base_pose)
         self.rotation = Rotation.from_quat(self.base[3:])
         robot = planner_robot(self.arm, asset_root)
@@ -143,7 +170,7 @@ class ArmPlanner:
         if not excluded <= self.meshes.keys():
             raise ValueError("Contact object is not a planning obstacle")
         if exclude_target:
-            excluded.add(self.target_object)
+            excluded.add(self.contact_target)
         for name in self.meshes:
             checker.enable_obstacle(name, name not in excluded)
         return len(boxes) + len(meshes) - len(excluded)

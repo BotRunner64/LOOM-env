@@ -76,6 +76,17 @@ class ReplayComparison:
                     * Rotation.from_quat(desired[3:].copy())
                 ).magnitude()
             )
+        for key, actual in frame.world_state.items():
+            if "/joints/" in key and key.endswith("/position"):
+                errors[f"{key}_rad"] = float(np.max(np.abs(actual - truth[key])))
+            elif "/links/" in key and key.endswith("/pose_world"):
+                errors[f"{key}_m"] = float(np.linalg.norm(actual[:3] - truth[key][:3]))
+                errors[f"{key}_rad"] = float(
+                    (
+                        Rotation.from_quat(actual[3:].copy())
+                        * Rotation.from_quat(truth[key][3:].copy()).inv()
+                    ).magnitude()
+                )
         if step == 0:
             self.initial_errors = errors.copy()
         for key, value in errors.items():

@@ -3,8 +3,8 @@
 
 import argparse
 import json
-from pathlib import Path
 import traceback
+from pathlib import Path
 
 from loom_env.specs.config import load_collection
 
@@ -27,12 +27,13 @@ def main():
     env = None
     report = {"passed": False}
     try:
-        from PIL import Image
         import torch
-        from loom_env.assets.catalog import asset_definition
+        from PIL import Image
+
+        from loom_env.assets.catalog import asset_definition, is_articulated
         from loom_env.embodiments.commands import initial_command
-        from loom_env.tasks import create_task
         from loom_env.runtime.build import create_environment
+        from loom_env.tasks import create_task
 
         env = create_environment(collection, args.asset_root)
         try:
@@ -49,21 +50,35 @@ def main():
         }
         import numpy as np
         import omni.usd
+
         from loom_env.assets.prepare import physics_properties
 
         stage = omni.usd.get_context().get_stage()
         report["physics_checks"] = {}
         for name, obj in collection.scene.objects.items():
             expected = env.asset_manifests[obj["asset"]]["physics_properties"]
-            actual = physics_properties(
-                stage, stage.GetPrimAtPath(f"/World/envs/env_0/object_{name}")
-            )
+            definition = asset_definition(obj["asset"])
+            root = stage.GetPrimAtPath(f"/World/envs/env_0/object_{name}")
+            if is_articulated(definition):
+                from loom_env.assets.articulation import describe
+
+                actual = describe(stage, definition, root=root)
+                # Runtime pose transforms are not physical-property overrides.
+                for body in actual["bodies"]:
+                    actual["bodies"][body]["pose_asset"] = expected["bodies"][body][
+                        "pose_asset"
+                    ]
+                masses = [
+                    expected["bodies"][body]["physics"]["mass_kg"]
+                    for body in env.scene[f"object_{name}"].body_names
+                ]
+            else:
+                actual = physics_properties(stage, root)
+                masses = expected.get("mass_kg")
             passed = actual == expected
             if name in report["body_mass_kg"]:
                 passed &= bool(
-                    np.allclose(
-                        report["body_mass_kg"][name], expected["mass_kg"], rtol=1e-5
-                    )
+                    np.allclose(report["body_mass_kg"][name], masses, rtol=1e-5)
                 )
             report["physics_checks"][name] = {
                 "passed": passed,

@@ -5,7 +5,8 @@ from types import SimpleNamespace
 import pytest
 
 
-def test_world_updates_move_obstacles_and_restore_target_collision():
+@pytest.mark.parametrize("target_mesh", ["target", "target/links/lid"])
+def test_world_updates_move_obstacles_and_restore_target_collision(target_mesh):
     torch = pytest.importorskip("torch")
     pytest.importorskip("curobo")
     if not torch.cuda.is_available():
@@ -37,6 +38,7 @@ def test_world_updates_move_obstacles_and_restore_target_collision():
     planner = ArmPlanner.__new__(ArmPlanner)
     planner.side = "right"
     planner.target_object = "target"
+    planner.contact_target = target_mesh
     planner.base = np.array([0, 0, 0, 0, 0, 0, 1])
     planner.rotation = Rotation.identity()
     planner.scene = SimpleNamespace(objects={"table": {}, "target": {}})
@@ -51,7 +53,7 @@ def test_world_updates_move_obstacles_and_restore_target_collision():
             faces=geometry.faces.tolist(),
             pose=[0, 0, 0, 1, 0, 0, 0],
         )
-        for name in planner.scene.objects
+        for name in ("table", target_mesh)
     }
     planner.planner = SimpleNamespace(
         scene_collision_checker=checker,
@@ -68,7 +70,7 @@ def test_world_updates_move_obstacles_and_restore_target_collision():
     observation = SimpleNamespace(values={"robot/left/joint_position": [-1.0]})
     truth = {
         "table/pose_world": np.array([0, 0, 0, 0, 0, 0, 1.0]),
-        "target/pose_world": np.array([1, 0, 0, 0, 0, 0, 1.0]),
+        f"{target_mesh}/pose_world": np.array([1, 0, 0, 0, 0, 0, 1.0]),
     }
     query = torch.tensor(
         [[[[x + 0.055, 0, 0, 0.03] for x in [-2, -1, 0, 1, 2]]]],
@@ -98,7 +100,7 @@ def test_world_updates_move_obstacles_and_restore_target_collision():
     check(True, [False, True, True, False, False], 2)
     check(False, [False, True, True, True, False], 3)
     observation.values["robot/left/joint_position"] = [-2.0]
-    truth["target/pose_world"][0] = 2.0
+    truth[f"{target_mesh}/pose_world"][0] = 2.0
     check(False, [True, False, True, False, True], 3)
     planner.attached = True
     check(False, [True, False, True, False, False], 2)

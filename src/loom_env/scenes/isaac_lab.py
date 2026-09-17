@@ -1,12 +1,49 @@
 """Spawn prepared asset instances using Isaac Lab's native USD spawner."""
 
 import isaaclab.sim as sim_utils
-from isaaclab.assets import AssetBaseCfg, RigidObjectCfg
+from isaaclab.assets import ArticulationCfg, AssetBaseCfg, RigidObjectCfg
 
-from loom_env.assets.catalog import prepared_directory
+from loom_env.assets.catalog import (
+    asset_definition,
+    is_articulated,
+    load_prepared,
+    prepared_directory,
+)
 
 
 def instance_config(obj, prim_path, world_pose, asset_root):
+    definition = asset_definition(obj["asset"])
+    if is_articulated(definition):
+        from loom_env.embodiments.isaac_lab import spawn_robot
+        from loom_env.scenes.workspace import transform
+
+        physics = load_prepared(asset_root, obj["asset"])["physics_properties"]
+        limits = physics["joint"]["limits_rad"]
+        q = obj["joint_positions"][definition.joint]
+        if not limits[0] <= q <= limits[1]:
+            raise ValueError("Initial object joint position exceeds USD limits")
+        base_pose = transform(
+            world_pose, physics["bodies"][definition.root_body]["pose_asset"]
+        )
+        return ArticulationCfg(
+            prim_path=prim_path,
+            spawn=sim_utils.UsdFileCfg(
+                usd_path=str(
+                    (
+                        prepared_directory(asset_root, obj["asset"]) / "asset.usda"
+                    ).resolve()
+                ),
+                func=spawn_robot,
+            ),
+            init_state=ArticulationCfg.InitialStateCfg(
+                pos=tuple(base_pose[:3]),
+                rot=tuple(base_pose[3:]),
+                joint_pos=dict(obj["joint_positions"]),
+                joint_vel={".*": 0.0},
+            ),
+            actuators={},
+            soft_joint_pos_limit_factor=1.0,
+        )
     cls = AssetBaseCfg if obj["static"] else RigidObjectCfg
     spawn = sim_utils.UsdFileCfg(
         usd_path=str(

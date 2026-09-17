@@ -1,0 +1,17 @@
+#usda 1.0
+(
+    customLayerData = {
+        string source_revision = "91f76c28d93dd20c5fa46ce6a5a1d96a4f384acd"
+        string source_sha256 = "796bc70d0edf20ca2959cf848c506097e2358931c110eec6612f9e27006ab305"
+    }
+    defaultPrim = "Asset"
+    metersPerUnit = 1
+    upAxis = "Z"
+)
+
+# Preserve source physics. This candidate has not passed task admission checks.
+def Xform "Asset" (
+    prepend references = @object.usdz@
+)
+{
+}
