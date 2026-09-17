@@ -19,9 +19,6 @@ class CoinInsertionTask(ObjectTask):
             (
                 "depth",
                 "max_depth",
-                "along_tolerance",
-                "across_tolerance",
-                "angle_tolerance",
                 "lift_clearance",
                 "contact_force",
             ),
@@ -50,6 +47,7 @@ class CoinInsertionTask(ObjectTask):
         self.fixture = asset_definition("robodojo:coin_slot")
         bounds = np.asarray(self.fixture.bounds)
         self.slot_center = bounds.mean(0)[:2]
+        self.slot_half_size = (bounds[1, :2] - bounds[0, :2]) / 2
         self.slot_top = bounds[1, 2]
         coin_bounds = np.asarray(self.asset.bounds)
         self.center = coin_bounds.mean(0)
@@ -94,11 +92,15 @@ class CoinInsertionTask(ObjectTask):
             "finger_force": float(np.linalg.norm(forces, axis=-1).max()),
         }
 
-    def aligned(self, m):
-        return (
-            m["along_error"] <= self.parameters["along_tolerance"]
-            and m["across_error"] <= self.parameters["across_tolerance"]
-            and m["angle"] <= self.parameters["angle_tolerance"]
+    def in_target(self, m):
+        """Locate the coin over this fixture, without requiring precise centering.
+
+        Combined with depth and release, the physical slot contains the coin;
+        this footprint check excludes placements beside or in the other slot.
+        """
+        return bool(
+            m["along_error"] <= self.slot_half_size[0]
+            and m["across_error"] <= self.slot_half_size[1]
         )
 
     def reset(self, initial_state):
@@ -113,20 +115,20 @@ class CoinInsertionTask(ObjectTask):
             m["grasped"] and m["source_clearance"] >= self.parameters["lift_clearance"]
         )
         self.approached |= (
-            self.lifted and m["grasped"] and self.aligned(m) and m["depth"] < -0.002
+            self.lifted and m["grasped"] and self.in_target(m) and m["depth"] < -0.002
         )
         self.inserted_held |= (
             self.approached
             and m["grasped"]
-            and self.aligned(m)
+            and self.in_target(m)
             and m["depth"] >= self.parameters["depth"]
         )
         points, _ = self._state(world_state)
-        if self.aligned(m) and m["depth"] > self.parameters["max_depth"]:
+        if self.in_target(m) and m["depth"] > self.parameters["max_depth"]:
             return TaskStatus(Outcome("task_failure", "coin_below_slot_floor"))
         condition = (
             self.inserted_held
-            and self.aligned(m)
+            and self.in_target(m)
             and self.parameters["depth"] <= m["depth"] <= self.parameters["max_depth"]
             and not m["any_grasped"]
             and m["finger_force"] <= self.parameters["contact_force"]

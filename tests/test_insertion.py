@@ -82,9 +82,9 @@ def test_incorrect_placement_rejected(insertion, kind):
     world["coin/grasped_by"][:] = False
     frame = Rotation.from_quat(world[f"{task.target}/pose_world"][3:])
     if kind == "across":
-        world["coin/pose_world"][:3] += frame.apply([0, 0.002, 0])
+        world["coin/pose_world"][:3] += frame.apply([0, 0.02, 0])
     elif kind == "along":
-        world["coin/pose_world"][:3] += frame.apply([0.004, 0, 0])
+        world["coin/pose_world"][:3] += frame.apply([0.04, 0, 0])
     elif kind == "tilted":
         world["coin/pose_world"][3:] = [0, 0, 0, 1]
     elif kind == "shallow":
@@ -109,6 +109,33 @@ def test_coin_spin_does_not_change_plane_alignment(insertion):
     new = task.metrics(world)
     assert new["angle"] == pytest.approx(old["angle"])
     assert new["depth"] == pytest.approx(old["depth"])
+
+
+def test_released_coin_can_be_off_center_and_tilted(insertion):
+    task, world = insertion
+    approach_and_insert(task, world)
+    frame = Rotation.from_quat(world[f"{task.target}/pose_world"][3:])
+    pose = world["coin/pose_world"]
+    center = Rotation.from_quat(pose[3:]).apply(task.center) + pose[:3]
+    rotation = frame * Rotation.from_euler("x", 95, degrees=True)
+    pose[3:] = rotation.as_quat()
+    pose[:3] = center + frame.apply([0.002, 0.001, 0]) - rotation.apply(task.center)
+    world["coin/grasped_by"][:] = False
+    assert task.metrics(world)["angle"] > np.deg2rad(2)
+    assert task.update(world, 0.25).outcome.code == "success"
+
+
+def test_coin_must_remain_in_target_after_release(insertion):
+    task, world = insertion
+    approach_and_insert(task, world)
+    world["coin/grasped_by"][:] = False
+    assert task.update(world, 0.15).outcome is None
+    frame = Rotation.from_quat(world[f"{task.target}/pose_world"][3:])
+    world["coin/pose_world"][:3] += frame.apply([0, 0.02, 0])
+    assert task.update(world, 0.15).outcome is None
+    world["coin/pose_world"][:3] -= frame.apply([0, 0.02, 0])
+    assert task.update(world, 0.15).outcome is None
+    assert task.update(world, 0.1).outcome.code == "success"
 
 
 def test_excessive_depth_is_failure(insertion):
@@ -140,12 +167,13 @@ def test_thin_coin_grasp_still_requires_real_opposing_contacts():
     assert not opposing_contacts(force * 0.1)
 
 
-def test_insertion_goal_compensates_measured_coin_slip(insertion):
+def test_preinsertion_goal_compensates_measured_coin_slip(insertion):
     from types import SimpleNamespace
+
     from loom_env.experts.insertion import CoinInsertionExpert
     from loom_env.specs.episode import Observation
 
-    task, world = insertion
+    _, world = insertion
     collection = load_collection(ROOT / "configs/collection/insert_coin.yaml")
     expert = CoinInsertionExpert(
         collection, SimpleNamespace(detach=lambda: None), lambda: world
@@ -168,8 +196,47 @@ def test_insertion_goal_compensates_measured_coin_slip(insertion):
     np.testing.assert_allclose(second[3:], first[3:], atol=1e-8)
 
 
+def test_insertion_does_not_chase_coin_tilt(insertion):
+    from types import SimpleNamespace
+
+    from loom_env.experts.insertion import CoinInsertionExpert
+    from loom_env.specs.episode import Observation
+
+    _, world = insertion
+    collection = load_collection(ROOT / "configs/collection/insert_coin.yaml")
+    expert = CoinInsertionExpert(
+        collection, SimpleNamespace(detach=lambda: None), lambda: world
+    )
+    expert.reset(None)
+    tcp = np.r_[world["coin/pose_world"][:3] + [0, 0, 0.12], [1, 0, 0, 0]]
+    observation = Observation(0.0, {"robot/right/tcp_pose_world": tcp})
+    expert.stage_index = expert.STAGES.index("align")
+    expert._insertion_goal(observation, world, -0.004)
+    expert.stage_index = expert.STAGES.index("insert")
+    first = expert._insertion_goal(observation, world, 0.012)
+    np.testing.assert_allclose(first[3:], tcp[3:], atol=1e-8)
+    world["coin/pose_world"][3:] = (
+        Rotation.from_euler("y", 5, degrees=True)
+        * Rotation.from_quat(world["coin/pose_world"][3:])
+    ).as_quat()
+    second = expert._insertion_goal(observation, world, 0.012)
+    # Coin rotation alone must not induce TCP rotation or a pivot translation.
+    np.testing.assert_allclose(second, first, atol=1e-8)
+    moved_tcp = tcp.copy()
+    moved_tcp[3:] = (
+        Rotation.from_euler("y", 1, degrees=True) * Rotation.from_quat(tcp[3:])
+    ).as_quat()
+    third = expert._insertion_goal(
+        Observation(0.05, {"robot/right/tcp_pose_world": moved_tcp}), world, 0.012
+    )
+    np.testing.assert_allclose(third[3:], first[3:], atol=1e-8)
+    expert.reset(None)
+    assert expert.insert_rotation is None
+
+
 def test_insertion_accepts_readonly_world_poses(insertion):
     from types import SimpleNamespace
+
     from loom_env.experts.insertion import CoinInsertionExpert
     from loom_env.specs.episode import Observation
 

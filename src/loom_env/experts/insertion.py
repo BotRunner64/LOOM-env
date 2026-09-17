@@ -29,6 +29,7 @@ class CoinLiftExpert(LiftExpert):
 
     def _lift_step(self, observation):
         world, events = self.world_state(), []
+        speed = 0.02
         held = bool(world[f"{self.obj}/grasped_by"][0 if self.side == "left" else 1])
         self.lost_contact = 0 if held else self.lost_contact + 1
         if self.lost_contact >= 5:
@@ -40,7 +41,7 @@ class CoinLiftExpert(LiftExpert):
             self.lift_goal[2] += 0.125
             self.started = True
             events.append(
-                Event("skill", "slow_extraction", self.step, {"speed_m_s": 0.01})
+                Event("skill", "slow_extraction", self.step, {"speed_m_s": speed})
             )
         remaining = self.lift_goal[2] - tcp[2]
         if remaining < 0.001:
@@ -49,7 +50,7 @@ class CoinLiftExpert(LiftExpert):
             goal = self.lift_goal.copy()
             self.lift_reference_z = min(
                 self.lift_goal[2],
-                self.lift_reference_z + 0.01 * self.dt,
+                self.lift_reference_z + speed * self.dt,
                 float(tcp[2]) + 0.003,
             )
             goal[2] = self.lift_reference_z
@@ -93,6 +94,7 @@ class CoinInsertionExpert(CoinLiftExpert):
     def reset(self, episode_input):
         super().reset(episode_input)
         self.desired_rotation = None
+        self.insert_rotation = None
         self.best_depth = -np.inf
         self.stalled = 0
 
@@ -117,10 +119,16 @@ class CoinInsertionExpert(CoinLiftExpert):
             + fixture[:3]
         )
         desired_coin_position = center - self.desired_rotation.apply(self.task.center)
-        # Re-read the actual grasp transform; never set the physical coin pose.
+        # Correct position from the measured grasp, but hold the TCP orientation
+        # during insertion: rotating against the slot amplified coin tilt.
         coin_in_tcp = tcp_r.inv().apply(coin[:3] - tcp[:3])
-        relative_r = tcp_r.inv() * coin_r
-        goal_r = self.desired_rotation * relative_r.inv()
+        if self.stage == "insert":
+            if self.insert_rotation is None:
+                self.insert_rotation = tcp_r
+            goal_r = self.insert_rotation
+        else:
+            relative_r = tcp_r.inv() * coin_r
+            goal_r = self.desired_rotation * relative_r.inv()
         return np.r_[
             desired_coin_position - goal_r.apply(coin_in_tcp), goal_r.as_quat()
         ]
@@ -190,7 +198,7 @@ class CoinInsertionExpert(CoinLiftExpert):
                     contact_objects=contact,
                 )
                 if self.stage == "transfer":
-                    # Execute the collision-checked path with fourfold time
+                    # Execute the collision-checked path with twofold time
                     # scaling to avoid accelerating the thin coin out of the jaws.
                     knots = np.vstack(
                         [
@@ -198,23 +206,31 @@ class CoinInsertionExpert(CoinLiftExpert):
                             self.path,
                         ]
                     )
-                    time = np.arange(1, (len(knots) - 1) * 4 + 1) / 4
+                    time = np.arange(1, (len(knots) - 1) * 2 + 1) / 2
                     self.path = np.column_stack(
                         [
                             np.interp(time, np.arange(len(knots)), knots[:, j])
                             for j in range(knots.shape[1])
                         ]
                     )
-                    detail["execution_time_scale"] = 4
+                    detail["execution_time_scale"] = 2
                 events.append(Event("planning", self.stage, self.step, detail))
         if self.stage in {"align", "insert"}:
             align = self.stage == "align"
             depth = -0.004 if align else self.task.parameters["depth"] + 0.002
-            ready = self.task.aligned(m) and (
-                abs(m["depth"] - depth) < 0.0006
-                if align
-                else m["depth"] >= self.task.parameters["depth"]
-            )
+            if align:
+                # Entry precision guides the motion, not task acceptance.
+                ready = (
+                    m["along_error"] <= 0.0015
+                    and m["across_error"] <= 0.0004
+                    and m["angle"] <= np.deg2rad(2)
+                    and abs(m["depth"] - depth) < 0.0006
+                )
+            else:
+                ready = (
+                    self.task.in_target(m)
+                    and m["depth"] >= self.task.parameters["depth"]
+                )
             self.stable = self.stable + 1 if ready else 0
             if self.stable >= 3:
                 events.append(Event("planning", "coin_alignment", self.step, m))
@@ -223,8 +239,8 @@ class CoinInsertionExpert(CoinLiftExpert):
                 goal = self._insertion_goal(observation, world, depth)
                 tcp = observation.values[f"robot/{self.side}/tcp_pose_world"]
                 delta = goal[:3] - tcp[:3]
-                # 10 mm/s insertion, 30 mm/s pre-insertion alignment.
-                limit = (0.03 if align else 0.01) * self.dt
+                # 20 mm/s insertion, 60 mm/s pre-insertion alignment.
+                limit = (0.06 if align else 0.02) * self.dt
                 goal[:3] = tcp[:3] + delta * min(
                     1, limit / max(np.linalg.norm(delta), 1e-12)
                 )

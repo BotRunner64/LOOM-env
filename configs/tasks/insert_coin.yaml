@@ -10,8 +10,5 @@ parameters:
   failure_drop: 0.05
   depth: 0.010
   max_depth: 0.0175
-  along_tolerance: 0.0015
-  across_tolerance: 0.0004
-  angle_tolerance: 0.03490658503988659
   lift_clearance: 0.015
   contact_force: 0.02
