@@ -155,3 +155,51 @@ def test_contact_frame_is_link_local_and_independent_of_task_name(monkeypatch):
     expected = transform(body, contact)
     expected[:3] -= Rotation.from_quat(expected[3:]).apply([0, 0, 0.165])
     np.testing.assert_allclose(expert._tcp(body, 0.065), expected)
+
+
+def test_joint_action_starts_from_measured_link_grasp():
+    from types import SimpleNamespace
+
+    from loom_env.experts.articulation import MoveJoint
+    from loom_env.runtime.runner import SourceFailure
+
+    world = {
+        "panel/joints/hinge/position": np.array(0.4),
+        "panel/links/lid/finger_contact_forces_world": np.zeros((2, 2, 3)),
+        "panel/links/base/pose_world": np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]),
+    }
+    goals = []
+    arm = SimpleNamespace(
+        obj="panel",
+        side="right",
+        asset=SimpleNamespace(joint="hinge", moving_body="lid", root_body="base"),
+        world=world,
+        tcp=np.array([0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0]),
+        dt=0.05,
+        tick=0,
+        closed=0.0,
+        grip_slice=slice(7, 8),
+        arm_slice=slice(0, 7),
+        command=np.zeros(8),
+        observation=None,
+        event=lambda *args: None,
+        planner=SimpleNamespace(
+            cartesian_step=lambda obs, state, goal: (
+                goals.append(goal.copy()) or np.zeros(7)
+            )
+        ),
+    )
+    joint = {
+        "type": "revolute",
+        "axis": [0, 0, 1],
+        "pose_parent": [0, 0, 0, 0, 0, 0, 1],
+    }
+    with pytest.raises(SourceFailure, match="moving link"):
+        MoveJoint(joint, 0.8, 0.01, 0.2).step(arm)
+    world["panel/links/lid/finger_contact_forces_world"][1] = [[0, 2, 0], [0, -2, 0]]
+    move = MoveJoint(joint, 0.8, 0.01, 0.2)
+    assert not move.step(arm)
+    np.testing.assert_allclose(goals[0][:3], [-np.sin(0.01), np.cos(0.01), 0])
+    # Completion uses measured q, not the commanded reference reaching target.
+    world["panel/joints/hinge/position"] = np.array(0.8)
+    assert move.step(arm)

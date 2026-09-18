@@ -101,11 +101,16 @@ def test_sliding_and_rotating_contacts_are_not_stable_holds(handover):
     assert task.update(world((False, True), 1.08), 0.05).outcome.code == "success"
 
 
-def test_expert_does_not_release_without_both_measured_grasps(handover):
+@pytest.mark.parametrize(
+    "contacts,message", [((True, False), "close"), ((False, True), "lost opposing")]
+)
+def test_expert_does_not_release_without_both_measured_grasps(
+    handover, contacts, message
+):
     from types import SimpleNamespace
 
-    from loom_env.experts.handover import HandoverExpert
     from loom_env.embodiments.manipulation import manipulation_profile
+    from loom_env.experts.handover import HandoverExpert
     from loom_env.runtime.runner import SourceFailure
     from loom_env.specs.episode import Observation
 
@@ -116,14 +121,13 @@ def test_expert_does_not_release_without_both_measured_grasps(handover):
         )
         for side in ("left", "right")
     }
-    state = world((True, False))
+    state = world(contacts)
     state["tea_pack/pose_world"][3:] = [0, 0, np.sqrt(0.5), np.sqrt(0.5)]
     state["tea_pack/center_of_mass_local"] = np.zeros(3)
     expert = HandoverExpert(handover, planners, lambda: state)
     expert.reset(None)
-    expert.index = expert.STAGES.index("receiver_close")
     giver_slice = handover.deployment.action_slices["left/gripper"]
-    expert.command[giver_slice] = 0.0
+    expert.arm.command[giver_slice] = 0.0
     observation = Observation(
         0,
         {
@@ -131,21 +135,47 @@ def test_expert_does_not_release_without_both_measured_grasps(handover):
                 f"robot/{side}/joint_position": np.array(arm.initial_positions)
                 for side, arm in handover.deployment.arms.items()
             },
-            "robot/left/tcp_pose_world": np.array([0, 0, 1, 0, 0, 0, 1]),
+            **{
+                f"robot/{side}/tcp_pose_world": np.array(
+                    [0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+                )
+                for side in ("left", "right")
+            },
         },
     )
-    with pytest.raises(SourceFailure, match="receiver_close"):
+    from loom_env.experts.actions import CloseGripper
+
+    for arm in expert.arms.values():
+        arm.update(observation, state)
+    # Reach the receiver's closing action through the real routine, without
+    # injecting legacy phase indices. Planning geometry is tested separately.
+    closes = 0
+    for action in expert.actions:
+        if isinstance(action, CloseGripper):
+            closes += 1
+            if closes == 2:
+                expert.current = action
+                break
+    with pytest.raises(SourceFailure, match=message):
         for _ in range(100):
             expert.act(observation)
-    assert expert.stage == "receiver_close"
-    assert expert.index < expert.STAGES.index("giver_release")
-    assert expert.command[giver_slice][0] == 0.0
+    assert not expert.current.done
+    assert expert.arm is expert.arms[expert.receiver]
+    assert expert.arm.command[giver_slice][0] == 0.0
+    assert expert.arms[expert.giver].command is expert.arms[expert.receiver].command
+    expert.reset(None)
+    assert expert.arm is expert.arms[expert.giver]
+    assert expert.current is None and not expert.finished and not expert.holding
+    assert all(arm.tick == -1 and arm.lost == 0 for arm in expert.arms.values())
+    assert expert.arms[expert.giver].command is expert.arms[expert.receiver].command
 
 
 @pytest.mark.parametrize("long_axis", [0, 1, 2])
 def test_automatic_grasps_follow_box_axis_com_and_arm_roles(handover, long_axis):
     from types import SimpleNamespace
+
     from scipy.spatial.transform import Rotation
+
     from loom_env.embodiments.manipulation import manipulation_profile
     from loom_env.experts.handover import HandoverExpert
 
@@ -183,6 +213,7 @@ def test_automatic_grasps_follow_box_axis_com_and_arm_roles(handover, long_axis)
 )
 def test_automatic_grasps_reject_boxes_that_do_not_fit(handover, size, message):
     from types import SimpleNamespace
+
     from loom_env.embodiments.manipulation import manipulation_profile
     from loom_env.experts.handover import HandoverExpert
 
@@ -203,6 +234,7 @@ def test_automatic_grasps_reject_boxes_that_do_not_fit(handover, size, message):
 
 def test_automatic_grasps_keep_finger_margin_for_offset_com(handover):
     from types import SimpleNamespace
+
     from loom_env.embodiments.manipulation import manipulation_profile
     from loom_env.experts.handover import HandoverExpert
 

@@ -317,7 +317,7 @@ python scripts/replay_episode.py outputs/composition-validation/episodes/place-u
 
 验证产物集中在 `outputs/handover-auto/`：`episodes/auto-{forward,reverse}/`、`videos/auto-{forward,reverse}.mp4`、`auto-{forward,reverse}-report.json`、`geometry-validation.json`。正面相机在交接高度处会裁掉部分物体，需结合腕部视频检查；正向关键帧为 `auto-forward-frames.png`。保留所有相机原视频。按下方前置条件，从仓库根目录复现本次运行时，collection 分别选 `handover.yaml` / `handover_reverse.yaml`，添加 `--max-steps 700`，并使用未占用的 episode ID。配置仍默认 1200 步；本次未执行物理重放。
 
-终点为接收臂在空中独立抓稳。任务先确认递出臂单独持有和双方共同持有；再检查接收臂单独持有、递出臂无接触、向上移动至少 5 cm，并连续 1 秒保持线速度不超过 0.02 m/s、角速度不超过 0.1 rad/s。完整物体离桌至少 4 cm。此判据独立于专家阶段，实测接触本身不等于稳定抓持。自动抓点的完整物理效果仍需按下述产物验收。
+终点为接收臂在空中独立抓稳。任务先确认递出臂单独持有和双方共同持有；再检查接收臂单独持有、递出臂无接触、向上移动至少 5 cm，并连续 1 秒保持线速度不超过 0.02 m/s、角速度不超过 0.5 rad/s。完整物体离桌至少 4 cm。此判据独立于专家阶段，实测接触本身不等于稳定抓持。自动抓点的完整物理效果仍需按下述产物验收。
 
 从仓库根目录，激活完整 `loom-env` 环境并完成 GPU/EULA 配置，准备 Panda、桌面和物体资产后运行：
 
@@ -800,9 +800,9 @@ SpringButton 仍是候选资产，没有接入任务。源 USD 的密度可供 P
 
 ## 共享动作重构
 
-本轮仅迁移 Lift、PickPlace、Insertion，删除 `GraspTransport` 及依赖 `STAGES`／`stage_index` 的继承。现有任务的目标、成功判据、资产物理属性均未修改；其他 expert 暂未迁移。
+全部七个 expert 已迁移到 `ActionExpert` + `routine()` + 反馈动作。删除 `GraspTransport`、各 expert 的 `STAGES`、阶段索引、`_advance`／`_change` 和各自的 `act()`；没有旧执行路径或兼容回退。现有任务的目标、成功判据和资产物理属性均未修改。
 
-完整流程在 `experts/pick_place.py`、`experts/insertion.py` 的 `routine()` 中安排动作。共享动作在 `experts/actions.py`，独立插入控制 `Insert` 在 `experts/insertion.py`。例如 PickPlace 使用如下普通 Python 顺序：
+完整流程在各 `experts/*.py` 的 `routine()` 中安排动作。共享规划／抓持／释放动作在 `experts/actions.py`，独立插入控制 `Insert` 在 `experts/insertion.py`，接触推进 `PushContact` 在 `experts/push.py`，关节约束运动 `MoveJoint` 在 `experts/articulation.py`。例如 PickPlace 使用如下普通 Python 顺序：
 
 ```python
 yield Grasp(contact_objects=initial_contacts(arm))
@@ -841,8 +841,66 @@ python -m pytest -q
 
 重复运行需更换回合 ID。采集打印 `RESULT` 及产物路径，预期 `outcome.code=success`；视频位于 `videos/<id>.mp4`，原始相机位于 `episodes/<id>/cameras/`。重放报告预期 `passed: true`。日志使用 `action=...`，定位失败时查看动作事件及 `SourceFailure`：缺少初始抓持、持续丢失接触、规划未到位和插入停滞分别报告，不再依赖专家内部阶段编号排查。
 
-本机 seed 0 的普通抓放 `place-01` 205 步成功、硬币抬升 `lift-01` 259 步成功、插入 `insert-01` 500 步成功。前两项与上一轮相同；插入由 508 步变为 500 步，动作完成后现在可以在同一控制周期切换，不再保留旧阶段之间的额外等待。动作的速度、抓持稳定采样要求和任务成功阈值没有调整；物理细节仍以本轮轨迹为准，不能把步数减少解释为新的速度优化。
+首批三类流程迁移时，本机 seed 0 的普通抓放 `place-01` 205 步成功、硬币抬升 `lift-01` 259 步成功、插入 `insert-01` 500 步成功。前两项与上一轮相同；插入由 508 步变为 500 步，动作完成后现在可以在同一控制周期切换，不再保留旧阶段之间的额外等待。动作的速度、抓持稳定采样要求和任务成功阈值没有调整；物理细节仍以本轮轨迹为准，不能把步数减少解释为新的速度优化。
 
 独立动作测试在 `tests/test_expert_actions.py`、`tests/test_insertion.py`：已有抓持直接执行运动或入口插入、不重新接近／张开；缺少或失去真实抓持时失败；释放必须等待反馈；完整插入流程能跳过已经完成的抓取／抽出。原有几何、只读状态、抓持滑移和防倾倒假成功检查继续保留。这些测试验证接口可组合，物理效果由上述回合及视频验收。
 
-最终版本确认回合为 `place-02`（205 步）和 `insert-02`（500 步）；与初轮对应回合逐帧动作及目标物体位姿分量差均为 0。`insert-02-report.json` 的离线重算确认成功，终点深度 15.771 mm、手指接触力为 0。重放 `insert-01` 通过 501 帧比较，最大硬币位置差 0.483 mm、姿态差 0.0611 rad，结果一致但不是数值完全相同；报告位于 `replay/insert-01-replay-comparison.json`。完整 CUDA 测试 264 项通过；最后补充的已有抓持姿态保留分支及相关 59 项测试通过。修改文件 Ruff 检查与 `git diff --check` 通过。完整汇总为 `outputs/action-refactor/summary.json`。
+首批迁移确认回合为 `place-02`（205 步）和 `insert-02`（500 步）；与初轮对应回合逐帧动作及目标物体位姿分量差均为 0。`insert-02-report.json` 的离线重算确认成功，终点深度 15.771 mm、手指接触力为 0。重放 `insert-01` 通过 501 帧比较，最大硬币位置差 0.483 mm、姿态差 0.0611 rad，结果一致但不是数值完全相同；报告位于 `replay/insert-01-replay-comparison.json`。完整 CUDA 测试 264 项通过；最后补充的已有抓持姿态保留分支及相关 59 项测试通过。修改文件 Ruff 检查与 `git diff --check` 通过。完整汇总为 `outputs/action-refactor/summary.json`。
+
+
+### 全部流程迁移
+
+Push、Sweep、Handover、Articulation 也使用同一个执行器。`Move` 集中处理路径推进和实测关节到位；原有不同负载的到位容差保留为参数（普通运动 0.01、刷子 0.015、交接 0.02 rad），交接仍要求连续 `hold_time` 的稳定测量。`CloseGripper` 可接收抓持判定：刚体用夹持反馈，关节用活动 link 的相向手指接触，交接接收阶段用双手同时抓持。`Release` 同样等待反馈；不能用夹爪命令值代替真实释放。
+
+双臂流程使用两个 `Manipulator` 和一个共享命令缓冲区。流程在 `yield` 前选择 `self.arm`，执行器每帧只读取一次世界状态并同时更新两手；`holding` 中的手持续检查抓持，单帧多动作切换不会重复计入丢失次数。接收手抓稳前由递出手负责持物，释放开始后由接收手负责。规划包络仍只属于规划器，物体运动完全由接触物理产生。重置重新创建全部动作、恢复递出手、清空反馈计数并解除两个规划器包络。
+
+推物和扫物的接触推进合并为 `PushContact`，保留原有速度和侧向修正差异。扫物退出继续按实测刷子离桌高度校正，最多两次重试；没有新增补偿机制。关节流程以活动 link 的接触位姿规划接近，再调用 `MoveJoint`；它从实测 TCP 和关节位置建立参考，不需要先运行开盖 expert。底座固定、Panda 夹爪和当前几何适用范围未扩大。
+
+在仓库根目录、同上 `loom-env` 环境及 GPU 设置，先按资产准备指南准备对应配置的桌子、机器人与物体，然后在沙箱外运行：
+
+```bash
+for name in push sweep handover open_laptop close_laptop_partway pick_place lift_coin insert_coin handover_reverse; do
+  python scripts/collect.py --collection configs/collection/$name.yaml \
+    --output-dir outputs/full-action-refactor --episode-id $name-01
+done
+python scripts/inspect_data.py episode outputs/full-action-refactor/episodes/handover-01
+python -m pytest -q
+```
+
+每次复跑更换回合 ID。`RESULT` 给出真实任务结果，`video_error` 应为空；视频位于 `outputs/full-action-refactor/videos/<id>.mp4`。交接的稳定性验收仍有超时，见下表，不应将流程走完当成任务成功。失败时先看报告中的动作事件、规划异常或任务失败原因，不能用测试通过替代视频与轨迹验收。
+
+
+迁移时按原角速度阈值 0.1 rad/s 的 seed 0 验证（`outputs/full-action-refactor/summary.json` 包含轨迹离线重算；后续阈值调整见本节末）：
+
+| 回合 | 步数 | 独立任务验收 |
+| --- | ---: | --- |
+| `push-01` | 123 | 成功 |
+| `sweep-01` | 260 | 成功 |
+| `open_laptop-01` | 206 | 成功 |
+| `close_laptop_partway-01` | 166 | 成功 |
+| `pick_place-01` | 205 | 成功 |
+| `lift_coin-01` | 259 | 成功 |
+| `insert_coin-01` | 500 | 成功 |
+| `handover-01` | 1200 | 稳定性验收超时 |
+| `handover_reverse-01` | 1200 | 稳定性验收超时 |
+
+抓放、抬升、插入与首批迁移对应回合的动作及目标物体位姿逐帧差值均为 0，比较记录为 `unchanged-workflows.json`。完整测试 265 项通过（`tests.log`），之后补回交接抓点几何日志并复查相关 13 项测试；Ruff 与差异空白检查通过。独立动作测试覆盖活动 link 已有抓持直接开始关节运动、缺少抓持拒绝执行、按实测关节位置完成；交接测试覆盖接收手未抓稳、递出手丢失抓持时禁止释放，以及两臂共用命令与重置状态。已检查新增四类流程的正面关键帧，拼图为 `review.jpg`，完整视频与轨迹用于进一步检查。
+
+交接对照使用提交 `fa6394f` 的原实现。正向 `handover-old-03` 和反向 `handover_reverse-old` 均在 1200 步超时；两组新旧配置、资产版本、运行时版本、初态及 seed 全部一致。正向末段角速度旧／新为 0.232／0.360 rad/s，反向为 0.124／0.279 rad/s，均超过当时任务的 0.1 rad/s 阈值；接收手仍抓持、递出手接触力为零，独立抬升均超过 8 cm。旧版也失败只说明该验收问题原已存在，不代表新旧轨迹数值等价或稳定性已经解决。本轮没有修改资产或验收阈值。
+
+正向对照前两次分别在 18／181 步因 PhysX CUDA 719 中断，记录在 `.incomplete/handover-old*` 和相应日志中，不计入有效物理对照。有效正向对照改用独立导出的原提交与标准入口；可在仓库根目录、上述环境中复现（替换回合 ID）：
+
+```bash
+mkdir -p /tmp/loom-expert-baseline-fa6394f
+git archive fa6394f | tar -x -C /tmp/loom-expert-baseline-fa6394f
+PYTHONPATH=/tmp/loom-expert-baseline-fa6394f/src \
+  python /tmp/loom-expert-baseline-fa6394f/scripts/collect.py \
+  --collection "$PWD/configs/collection/handover.yaml" \
+  --asset-root "$PWD/.cache/assets" --output-dir "$PWD/outputs/full-action-refactor" \
+  --episode-id handover-baseline-recheck
+```
+
+总报告为 `outputs/full-action-refactor/validation.json`，包含 9 个新版回合、双向旧版对照、逐帧比较和中断记录。运行代码相对此轮起点净减少 305 行。当前仓库仅保留新执行架构，旧提交只用于隔离对照；该报告中的交接尚未通过当时的稳定性阈值，后续验收调整如下。
+
+
+2026-09-18 按用户确认，将 `configs/tasks/handover_object.yaml` 的角速度上限从 0.1 放宽到 **0.5 rad/s**（约 28.6°/s），采用高于这两条记录末段 0.28–0.36 rad/s 的整值容许范围。仍要求连续 1 秒满足全部条件，线速度上限为 0.02 m/s。对已记录的真实物理状态仅替换该参数逐帧重算，正向 `handover-01` 在第 **499** 步成功，反向 `handover_reverse-01` 在第 **498** 步成功；相关 13 项测试通过。报告为 `outputs/full-action-refactor/handover-threshold-recheck.json`。这是新验收标准下的离线重算，没有重新运行仿真，也没有覆盖原回合的超时结果；物理运动本身未因验收参数调整而改变。

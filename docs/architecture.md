@@ -24,7 +24,7 @@
 
 ## 执行职责
 
-Runner 协调下面的循环与记录。环境持有物理状态，专家持有动作阶段，任务检查器持有判定进度。
+Runner 协调下面的循环与记录。环境持有物理状态，专家组合动作，动作持有自身执行进度，任务检查器持有判定进度。
 
 ```mermaid
 flowchart LR
@@ -56,14 +56,14 @@ flowchart LR
 
 命令入口在 `scripts/`，依赖在 `pyproject.toml`。随[任务与场景拓展](expansion-plan.md)按具体案例检查组装入口的角色假设和部署与本体定义的重复；进度统一见 [README](../README.md#当前进度)。
 
-Expert 是完整示范的执行策略，现有类名不是一套交互能力分类。具体任务可以复用同一个入口；`runtime/build.py` 不按物体资产 ID 特殊分派。第一批迁移覆盖 Lift、PickPlace、Insertion：它们在普通 Python `routine()` 中组合共享动作，不再继承完整抓放状态机。
+Expert 是完整示范的执行策略，现有类名不是一套交互能力分类。具体任务可以复用同一个入口；`runtime/build.py` 不按物体资产 ID 特殊分派。全部七个 expert（Lift、PickPlace、Insertion、Push、Sweep、Handover、Articulation）在普通 Python `routine()` 中组合反馈动作，共用 `ActionExpert.reset/act/close`；没有保留逐 expert 的阶段执行器。
 
 `experts/actions.py` 中的 `Grasp` 只负责接近并建立抓持，`MoveHeld` 负责已有抓持下的规划运动，`Extract` 负责沿给定退出轴的持物运动，`Release` 负责松开并观察释放；`Move` 提供不要求持物的规划运动。插入特有的对齐与进入控制是 `experts/insertion.py::Insert`，可以从入口附近的已有抓持状态独立开始，不负责取物和搬运。完整的 `InsertionExpert` 负责按初态选择准备动作，然后组合这些操作。动作完成只允许流程继续，不代表任务成功。
 
 动作使用显式的 `Manipulator` 状态／命令缓冲区，依赖当前观测、物体状态和规划器，不读取任务 ID 或完整流程的阶段编号。每个控制周期先 `update(observation, world)`，再调用当前动作的 `step(arm)`；它返回是否完成，失败抛出 `SourceFailure`。`ActionExpert` 只推进 Python 生成器、汇总命令及事件，没有动作注册表或流程配置语言。采集者仍使用原有的一步 `collect.py` 入口。
 
-Push、Sweep、Handover 以及现有名为 ArticulationExpert 的流程尚未迁移到共享动作。这些名字和现有实现暂不作为继续扩展的分类依据；关节类型描述的是运动约束，是否复用控制需依据接触与反馈。当前范围、接口示例、验证结果和运行命令集中在[共享动作重构](implementation.md#共享动作重构)。
+Push 与 Sweep 共用 `PushContact`，区别由速度、侧向修正、接触物体和持工具要求表达。Handover 依次切换同一执行器中的活动手，两手共享命令缓冲区，分别使用自身规划器；`holding` 指定当前必须保持真实抓持的手。接收手连续抓稳后，才进入递出手释放。Articulation 组合 `Move`、`CloseGripper`、`MoveJoint`、`Release`；关节类型只描述运动约束，`MoveJoint` 可以从已有活动 link 抓持独立开始。当前范围、接口示例、验证结果和运行命令集中在[共享动作重构](implementation.md#共享动作重构)。
 
-资产目录只标注交互几何：抓取点及可选局部朝向、圆柱配合特征、槽入口坐标系、活动 link 的接触坐标系。质量、材质、碰撞和关节仍只来自 USD。任务定义目标、过程限制和验收；专家负责执行选择；任务判据独立读取测量历史。当前未迁移的关节流程仍把 `contact_index` 放在任务参数中，属于尚待分离的执行选择。插入控制与判据共用 `assets/insertion.py` 的几何计算，专家不实例化任务检查器。
+资产目录只标注交互几何：抓取点及可选局部朝向、圆柱配合特征、槽入口坐标系、活动 link 的接触坐标系。质量、材质、碰撞和关节仍只来自 USD。任务定义目标、过程限制和验收；专家负责执行选择；任务判据独立读取测量历史。关节流程的接触选择沿用现有 `contact_index` 参数；这轮迁移执行架构，不修改任务配置协议。插入控制与判据共用 `assets/insertion.py` 的几何计算，插入专家不实例化任务检查器。
 
 开盖与半合盖共用 `ArticulationExpert` 和 `ArticulationTask`。关节运动取 USD 的类型、轴、父坐标系和限位；旋转用弧度，滑动用米。当前控制流程为抓持后运动并释放，仍限定 Panda、固定底座、两个 link 和一个活动关节。插入目前支持圆片状圆柱与槽，不能把接口泛化当作任意插销／螺纹插入已经验证。真实仿真覆盖范围、命令及证据集中在[能力边界重构](implementation.md#expert-能力边界重构)。

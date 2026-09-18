@@ -121,7 +121,7 @@ def test_push_reset_rejects_already_at_goal_and_clears_contact(push):
 @pytest.mark.parametrize("heading", [-90, 0, 90, 180])
 def test_push_expert_faces_travel_direction_and_releases_at_any_yaw(push, heading):
     from loom_env.embodiments.manipulation import manipulation_profile
-    from loom_env.experts.push import PushExpert
+    from loom_env.experts.push import PushContact, PushExpert
 
     collection, task, world = push
     direction = Rotation.from_euler("z", heading, degrees=True).apply([1, 0, 0])
@@ -145,13 +145,11 @@ def test_push_expert_faces_travel_direction_and_releases_at_any_yaw(push, headin
         expert.push_point,
     )
     world["object/pose_world"][:2] = task.target_position_world[:2]
-    expert.stage = "push"
     observation = SimpleNamespace(
-        values={
-            "robot/left/joint_position": np.asarray(
-                collection.deployment.arms["left"].initial_positions
-            )
-        }
+        values={"robot/right/tcp_pose_world": expert.tcp_goal}
     )
-    expert.act(observation)
-    assert expert.stage == "retreat"
+    expert.arm.update(observation, world)
+    push_action = next(
+        action for action in expert.routine() if isinstance(action, PushContact)
+    )
+    assert push_action.step(expert.arm)

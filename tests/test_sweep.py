@@ -138,21 +138,20 @@ def test_retreat_height_uses_measured_tool_clearance(sweep):
     c = load_collection(Path(__file__).parents[1] / "configs/collection/sweep.yaml")
     expert = SweepExpert(c, SimpleNamespace(detach=lambda: None), lambda: world)
     expert.reset(None)
-    expert.index = expert.STAGES.index("retreat")
     observation = SimpleNamespace(
         values={
             "robot/right/tcp_pose_world": np.array([0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0])
         }
     )
-    first = expert._goal(observation, world)
+    expert.arm.update(observation, world)
+    first = expert.retreat_goal()
     world["brush/pose_world"][2] -= 0.03
-    second = expert._goal(observation, world)
+    second = expert.retreat_goal()
     assert second[2] == pytest.approx(first[2] + 0.03)
     assert observation.values["robot/right/tcp_pose_world"][2] == 1.0
 
 
-@pytest.mark.parametrize("replans", [0, 2])
-def test_retreat_rechecks_low_tool_and_bounds_retries(sweep, replans):
+def test_retreat_rechecks_low_tool_and_bounds_retries(sweep):
     from types import SimpleNamespace
 
     from loom_env.experts.sweep import SweepExpert
@@ -162,23 +161,17 @@ def test_retreat_rechecks_low_tool_and_bounds_retries(sweep, replans):
     c = load_collection(Path(__file__).parents[1] / "configs/collection/sweep.yaml")
     expert = SweepExpert(c, SimpleNamespace(detach=lambda: None), lambda: world)
     expert.reset(None)
-    expert.index = expert.STAGES.index("retreat")
-    expert.started = True
-    expert.path = np.empty((0, 7))
-    expert.stable = 2
-    expert.retreat_replans = replans
-    world["brush/grasped_by"][1] = True
     observation = SimpleNamespace(
         values={
-            f"robot/{side}/joint_position": np.asarray(arm.initial_positions)
-            for side, arm in c.deployment.arms.items()
+            "robot/right/tcp_pose_world": np.array([0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0])
         }
     )
-    if replans == 2:
-        with pytest.raises(SourceFailure, match="did not clear"):
-            expert.act(observation)
-    else:
-        action = expert.act(observation)
-        assert expert.stage == "retreat" and not expert.started
-        assert expert.retreat_replans == 1
-        assert any(e.name == "retreat_clearance_retry" for e in action.events)
+    expert.arm.update(observation, world)
+    retreat = expert.retreat()
+    for attempt in range(3):
+        move = next(retreat)
+        assert move.name == "retreat"
+        np.testing.assert_allclose(move.goal, expert.retreat_goal())
+    with pytest.raises(SourceFailure, match="did not clear"):
+        next(retreat)
+    assert sum(e.name == "retreat_clearance_retry" for e in expert.arm.events) == 2

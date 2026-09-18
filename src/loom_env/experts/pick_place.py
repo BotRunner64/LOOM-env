@@ -40,7 +40,7 @@ class LiftExpert(ActionExpert):
         support, _ = workspace(self.collection.scene)
         yield Grasp(contact_objects=initial_contacts(arm))
         yield lift_from_support(arm, support)
-        self.hold_at_end = True
+        self.holding = (arm,)
 
 
 class PickPlaceExpert(ActionExpert):

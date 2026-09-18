@@ -10,4 +10,4 @@ parameters:
   transfer_distance: 0.05
   stable_time: 1.0
   linear_speed: 0.02
-  angular_speed: 0.1
+  angular_speed: 0.5

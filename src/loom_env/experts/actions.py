@@ -45,18 +45,6 @@ class Manipulator:
         self.tick += 1
         self.observation, self.world = observation, world
         self.events = []
-        other = "left" if self.side == "right" else "right"
-        part = self.deployment.action_slices[f"{other}/arm"]
-        if (
-            np.max(
-                np.abs(
-                    observation.values[f"robot/{other}/joint_position"]
-                    - self.command[part]
-                )
-            )
-            > 0.03
-        ):
-            raise SourceFailure("Holding arm moved outside tolerance", kind="skill")
 
     @property
     def held(self):
@@ -131,12 +119,15 @@ class Move(FeedbackAction):
         contact_objects=(),
         allow_object_contact=False,
         time_scale=1,
+        tolerance=0.01,
+        stable_samples=3,
     ):
         super().__init__(name)
         self.goal = np.asarray(goal).copy()
         self.contact_objects = tuple(contact_objects)
         self.allow_object_contact = allow_object_contact
         self.time_scale = time_scale
+        self.tolerance, self.stable_samples = tolerance, stable_samples
         self.index, self.stable = 0, 0
 
     def start(self, arm):
@@ -171,10 +162,10 @@ class Move(FeedbackAction):
             q = arm.observation.values[f"robot/{arm.side}/joint_position"]
             self.stable = (
                 self.stable + 1
-                if np.max(np.abs(q - arm.command[arm.arm_slice])) < 0.01
+                if np.max(np.abs(q - arm.command[arm.arm_slice])) < self.tolerance
                 else 0
             )
-            if self.stable >= 3:
+            if self.stable >= self.stable_samples:
                 return True
             if (self.steps - len(self.path)) * arm.dt > 3:
                 raise SourceFailure(
@@ -206,13 +197,15 @@ class MoveHeld(Move):
 
 
 class CloseGripper(FeedbackAction):
-    def __init__(self, *, stable_samples=5, min_time=0.6, timeout=2.0):
+    def __init__(self, *, stable_samples=5, min_time=0.6, timeout=2.0, contact=None):
         super().__init__("close", timeout)
+        self.contact = contact
         self.stable_samples, self.min_time, self.stable = stable_samples, min_time, 0
 
     def advance(self, arm):
         arm.command[arm.grip_slice] = arm.closed
-        self.stable = self.stable + 1 if arm.held else 0
+        held = self.contact(arm) if self.contact else arm.held
+        self.stable = self.stable + 1 if held else 0
         return (
             self.stable >= self.stable_samples and self.steps * arm.dt >= self.min_time
         )
@@ -264,8 +257,17 @@ class Grasp(FeedbackAction):
 class Release(FeedbackAction):
     """Open and confirm loss of grasp; detaches planning geometry only."""
 
-    def __init__(self, *, stable_samples=5, min_time=0.6, timeout=2.0, all_arms=False):
+    def __init__(
+        self,
+        *,
+        stable_samples=5,
+        min_time=0.6,
+        timeout=2.0,
+        all_arms=False,
+        released=None,
+    ):
         super().__init__("release", timeout)
+        self.released = released
         self.stable_samples, self.min_time = stable_samples, min_time
         self.all_arms, self.stable = all_arms, 0
 
@@ -279,7 +281,8 @@ class Release(FeedbackAction):
             if self.all_arms
             else arm.held
         )
-        self.stable = 0 if held else self.stable + 1
+        ready = self.released(arm) if self.released else not held
+        self.stable = self.stable + 1 if ready else 0
         return (
             self.stable >= self.stable_samples and self.steps * arm.dt >= self.min_time
         )
@@ -323,7 +326,15 @@ class Extract(FeedbackAction):
 class ActionExpert:
     """Drive a Python routine yielding feedback actions; owns no task stages."""
 
-    def __init__(self, collection, planner, world_state):
+    def __init__(
+        self,
+        collection,
+        planner,
+        world_state,
+        *,
+        side=None,
+        object_role="target_object",
+    ):
         self.collection, self.planner, self.world_state = (
             collection,
             planner,
@@ -332,34 +343,59 @@ class ActionExpert:
         self.arm = Manipulator(
             collection.deployment,
             collection.scene,
-            collection.arm_roles["manipulator"],
-            collection.role_bindings["target_object"],
+            side or collection.arm_roles["manipulator"],
+            collection.role_bindings[object_role],
             planner,
         )
 
+        self.arms = {self.arm.side: self.arm}
+
     def reset(self, episode_input):
-        self.arm.reset()
-        self.planner.detach()
+        command = initial_command(self.collection.deployment)
+        for arm in self.arms.values():
+            arm.reset()
+            arm.command = command
+            arm.planner.detach()
         self.actions = self.routine()
         self.current = None
         self.finished = False
-        self.hold_at_end = False
+        self.holding = ()
 
     def close(self):
-        self.planner.planner.destroy()
+        for arm in self.arms.values():
+            arm.planner.planner.destroy()
 
     def act(self, observation):
-        arm = self.arm
-        arm.update(observation, self.world_state())
+        world = self.world_state()
+        events = []
+        for arm in self.arms.values():
+            arm.update(observation, world)
+            arm.events = events
         while not self.finished:
             if self.current is None:
                 self.current = next(self.actions, None)
                 if self.current is None:
                     self.finished = True
                     break
-            if not self.current.step(arm):
+            for held in self.holding:
+                held.monitor_grasp()
+            if not self.current.step(self.arm):
                 break
             self.current = None
-        if self.finished and self.hold_at_end:
-            arm.monitor_grasp()
-        return Action(arm.command.copy(), tuple(arm.events))
+        # A routine selects the active arm before yielding its next action.
+        other = "left" if self.arm.side == "right" else "right"
+        part = self.collection.deployment.action_slices[f"{other}/arm"]
+        if (
+            np.max(
+                np.abs(
+                    observation.values[f"robot/{other}/joint_position"]
+                    - self.arm.command[part]
+                )
+            )
+            > 0.03
+        ):
+            raise SourceFailure("Holding arm moved outside tolerance", kind="skill")
+        if self.finished:
+            for held in self.holding:
+                held.monitor_grasp()
+        return Action(self.arm.command.copy(), tuple(events))

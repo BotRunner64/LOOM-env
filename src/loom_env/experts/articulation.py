@@ -1,15 +1,16 @@
-"""Move a passive joint through a measured link-local grasp."""
+"""Grasp a link, move along its measured joint, and release."""
 
 import numpy as np
 from scipy.spatial.transform import Rotation
 
-from loom_env.assets.catalog import asset_definition, load_prepared
+from loom_env.assets.catalog import load_prepared
 from loom_env.embodiments.assets import PANDA_ASSET
-from loom_env.embodiments.commands import initial_command
 from loom_env.embodiments.contacts import opposing_contacts
 from loom_env.runtime.runner import SourceFailure
 from loom_env.scenes.workspace import transform
-from loom_env.specs.episode import Action, Event
+from loom_env.specs.config import ARMS
+
+from .actions import ActionExpert, CloseGripper, FeedbackAction, Move, Release
 
 
 def joint_step(body_pose, joint_pose, axis, delta, joint_type):
@@ -26,23 +27,66 @@ def joint_step(body_pose, joint_pose, axis, delta, joint_type):
     ]
 
 
-class ArticulationExpert:
-    def __init__(self, collection, planner, world_state):
-        self.collection, self.planner, self.world_state = (
-            collection,
-            planner,
-            world_state,
+def link_held(arm):
+    return opposing_contacts(
+        arm.world[
+            f"{arm.obj}/links/{arm.asset.moving_body}/finger_contact_forces_world"
+        ][ARMS.index(arm.side)]
+    )
+
+
+class MoveJoint(FeedbackAction):
+    """Move an already grasped link along its USD joint axis and frame."""
+
+    def __init__(self, joint, target, tolerance, speed):
+        super().__init__("move_joint", timeout=20)
+        self.joint, self.target, self.tolerance, self.speed = (
+            joint,
+            target,
+            tolerance,
+            speed,
         )
-        self.side = collection.arm_roles["manipulator"]
+
+    def start(self, arm):
+        if not link_held(arm):
+            raise SourceFailure(
+                "Joint motion requires a grasp of the moving link", kind="skill"
+            )
+        self.grasp_q = float(arm.world[f"{arm.obj}/joints/{arm.asset.joint}/position"])
+        self.reference = self.grasp_q
+        self.origin = arm.tcp.copy()
+
+    def advance(self, arm):
+        q = float(arm.world[f"{arm.obj}/joints/{arm.asset.joint}/position"])
+        arm.command[arm.grip_slice] = arm.closed
+        if abs(self.target - q) < self.tolerance:
+            return True
+        parent = arm.world[f"{arm.obj}/links/{arm.asset.root_body}/pose_world"]
+        frame = transform(parent, self.joint["pose_parent"])
+        self.reference += np.clip(
+            self.target - self.reference, -self.speed * arm.dt, self.speed * arm.dt
+        )
+        desired = joint_step(
+            self.origin,
+            frame,
+            self.joint["axis"],
+            self.reference - self.grasp_q,
+            self.joint["type"],
+        )
+        arm.command[arm.arm_slice] = arm.planner.cartesian_step(
+            arm.observation, arm.world, desired
+        )
+        return False
+
+
+class ArticulationExpert(ActionExpert):
+    def __init__(self, collection, planner, world_state):
+        super().__init__(collection, planner, world_state)
+        self.side, self.obj, self.asset = self.arm.side, self.arm.obj, self.arm.asset
         if collection.deployment.arms[self.side].asset != PANDA_ASSET:
             raise ValueError(
                 "Articulation grasp manipulation currently requires the reviewed Panda fingers"
             )
-        self.obj = collection.role_bindings["target_object"]
-        self.asset = asset_definition(collection.scene.objects[self.obj]["asset"])
-        self.arm_slice = collection.deployment.action_slices[f"{self.side}/arm"]
-        self.grip_slice = collection.deployment.action_slices[f"{self.side}/gripper"]
-        self.dt = collection.deployment.control_dt
         self.target = collection.task.parameters["target_position"]
         physics = load_prepared(
             planner.asset_root, collection.scene.objects[self.obj]["asset"]
@@ -56,30 +100,8 @@ class ArticulationExpert:
             if self.joint["type"] == "revolute"
             else (0.02, 0.001)
         )
-        self.closed, self.opened = collection.deployment.arms[
-            self.side
-        ].gripper.command_limits[0]
         if not self.joint["limits"][0] <= self.target <= self.joint["limits"][1]:
             raise ValueError("Joint target exceeds USD joint limits")
-
-    def close(self):
-        self.planner.planner.destroy()
-
-    def reset(self, episode_input):
-        self.command = initial_command(self.collection.deployment)
-        self.stage, self.step, self.stage_steps = "approach", 0, 0
-        self.path, self.index, self.stable = None, 0, 0
-        self.planner.detach()
-
-    def _change(self, stage, events):
-        events.append(Event("skill", self.stage, self.step, {"phase": "end"}))
-        self.stage, self.stage_steps, self.path, self.index, self.stable = (
-            stage,
-            -1,
-            None,
-            0,
-            0,
-        )
 
     def _tcp(self, body, offset=0.0):
         contact = transform(body, self.contact_pose)
@@ -91,86 +113,23 @@ class ArticulationExpert:
             rotation.as_quat(),
         ]
 
-    def act(self, observation):
-        world, events = self.world_state(), []
-        if self.stage_steps == 0:
-            print(f"EXPERT step={self.step} stage={self.stage}", flush=True)
-            events.append(Event("skill", self.stage, self.step, {"phase": "begin"}))
-        body = world[f"{self.obj}/links/{self.asset.moving_body}/pose_world"]
-        q = float(world[f"{self.obj}/joints/{self.asset.joint}/position"])
-        forces = world[
-            f"{self.obj}/links/{self.asset.moving_body}/finger_contact_forces_world"
-        ][("left", "right").index(self.side)]
-        if self.stage in {"approach", "grasp_pose"}:
-            if self.path is None:
-                goal = self._tcp(body, 0.065 if self.stage == "approach" else 0.0)
-                self.path, detail = self.planner.plan(
-                    observation,
-                    world,
-                    goal,
-                    allow_object_contact=self.stage == "grasp_pose",
-                )
-                events.append(Event("planning", self.stage, self.step, detail))
-            if self.index < len(self.path):
-                self.command[self.arm_slice] = self.path[self.index]
-                self.index += 1
-            else:
-                error = np.max(
-                    np.abs(
-                        observation.values[f"robot/{self.side}/joint_position"]
-                        - self.command[self.arm_slice]
-                    )
-                )
-                self.stable = self.stable + 1 if error < 0.01 else 0
-                if self.stable >= 3:
-                    self._change(
-                        "grasp_pose" if self.stage == "approach" else "grasp", events
-                    )
-        elif self.stage == "grasp":
-            self.command[self.grip_slice] = self.closed
-            self.stable = self.stable + 1 if opposing_contacts(forces) else 0
-            if self.stable >= 3:
-                self.grasp_q = q
-                self.reference_q = q
-                self.grasp_tcp = observation.values[
-                    f"robot/{self.side}/tcp_pose_world"
-                ].copy()
-                self._change("move_joint", events)
-        elif self.stage == "move_joint":
-            remaining = self.target - q
-            if abs(remaining) < min(
-                self.precision, self.collection.task.parameters["position_tolerance"]
-            ):
-                self._change("release", events)
-            else:
-                parent = world[f"{self.obj}/links/{self.asset.root_body}/pose_world"]
-                joint_frame = transform(parent, self.joint["pose_parent"])
-                self.reference_q += np.clip(
-                    self.target - self.reference_q,
-                    -self.speed * self.dt,
-                    self.speed * self.dt,
-                )
-                desired = joint_step(
-                    self.grasp_tcp,
-                    joint_frame,
-                    self.joint["axis"],
-                    self.reference_q - self.grasp_q,
-                    self.joint["type"],
-                )
-                self.command[self.arm_slice] = self.planner.cartesian_step(
-                    observation, world, desired
-                )
-                if self.stage_steps % 20 == 0:
-                    print(
-                        f"JOINT step={self.step} measured={q:.5f} reference={self.reference_q:.5f} unit={self.joint['unit']}",
-                        flush=True,
-                    )
-        elif self.stage == "release":
-            self.command[self.grip_slice] = self.opened
-        if self.stage_steps * self.dt > 20:
-            raise SourceFailure(
-                f"Articulation stage {self.stage} timed out", kind="skill"
+    def routine(self):
+        arm = self.arm
+        for name, offset in (("approach", 0.065), ("grasp_pose", 0.0)):
+            body = arm.world[f"{arm.obj}/links/{arm.asset.moving_body}/pose_world"]
+            yield Move(
+                self._tcp(body, offset), name=name, allow_object_contact=offset == 0
             )
-        self.step += 1
-        self.stage_steps += 1
-        return Action(self.command.copy(), tuple(events))
+        yield CloseGripper(
+            stable_samples=3,
+            min_time=0,
+            timeout=20,
+            contact=link_held,
+        )
+        yield MoveJoint(
+            self.joint,
+            self.target,
+            min(self.precision, self.collection.task.parameters["position_tolerance"]),
+            self.speed,
+        )
+        yield Release(timeout=20, released=lambda arm: not link_held(arm))
