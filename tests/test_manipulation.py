@@ -95,7 +95,7 @@ def test_stage_completion_uses_position_not_reported_velocity(
     expert = LiftExpert(spec.collection, UnusedPlanner(), lambda: frame.world_state)
     expert.reset(None)
     arm = expert.arm
-    expert.planner.plan = lambda *args, **kwargs: (
+    expert.arm.planner.plan = lambda *args, **kwargs: (
         np.array([arm.command[arm.arm_slice]]),
         {},
     )
@@ -122,9 +122,9 @@ def test_retreat_returns_to_measured_pose_before_lowering(spec, frame_factory):
         goals.append(goal.copy())
         return np.array([expert.arm.command[expert.arm.arm_slice]]), {}
 
-    expert.planner.plan = plan
-    expert.planner.attach = lambda *args, **kwargs: setattr(
-        expert.planner, "attached", True
+    expert.arm.planner.plan = plan
+    expert.arm.planner.attach = lambda *args, **kwargs: setattr(
+        expert.arm.planner, "attached", True
     )
     values = dict(frame.observation.values)
     reached = np.array([0.5, 0, 1.05, 1, 0, 0, 0])

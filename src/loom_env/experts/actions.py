@@ -335,11 +335,7 @@ class ActionExpert:
         side=None,
         object_role="target_object",
     ):
-        self.collection, self.planner, self.world_state = (
-            collection,
-            planner,
-            world_state,
-        )
+        self.collection, self.world_state = collection, world_state
         self.arm = Manipulator(
             collection.deployment,
             collection.scene,

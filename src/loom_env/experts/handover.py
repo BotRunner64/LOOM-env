@@ -15,7 +15,6 @@ class HandoverExpert(ActionExpert):
             collection.arm_roles[k] for k in ("giver", "receiver")
         )
         super().__init__(collection, planners[self.giver], world_state, side=self.giver)
-        self.planners = planners
         self.obj, self.asset = self.arm.obj, self.arm.asset
         if any(arm.asset != PANDA_ASSET for arm in collection.deployment.arms.values()):
             raise ValueError("Handover currently requires dual Panda")
@@ -54,7 +53,7 @@ class HandoverExpert(ActionExpert):
         approach /= np.linalg.norm(approach)
         closing = np.cross(approach, axis)
         width = float(np.abs(rotation.inv().apply(closing)) @ size)
-        profiles = [self.planners[side].profile for side in (self.giver, self.receiver)]
+        profiles = [self.arms[side].profile for side in (self.giver, self.receiver)]
         # Clearance is shared by all objects; dimensions belong to the robot.
         separation = sum(p.handover_half_span for p in profiles) + 0.01
         end_margin = max(p.finger_half_span for p in profiles)
@@ -87,7 +86,7 @@ class HandoverExpert(ActionExpert):
         self.exchange_height = (
             radius
             + receiver_offset
-            + np.linalg.norm(self.planners[self.receiver].profile.tcp_to_grasp)
+            + np.linalg.norm(self.arms[self.receiver].profile.tcp_to_grasp)
             + self.collection.task.parameters["clearance"]
             + self.collection.task.parameters["transfer_distance"]
         )
@@ -117,7 +116,7 @@ class HandoverExpert(ActionExpert):
         )
         point[2] += clearance
         return np.r_[
-            point - rotation.apply(self.planners[side].profile.tcp_to_grasp),
+            point - rotation.apply(self.arms[side].profile.tcp_to_grasp),
             rotation.as_quat(),
         ]
 

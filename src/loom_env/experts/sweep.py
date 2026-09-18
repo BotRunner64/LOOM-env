@@ -52,7 +52,7 @@ class SweepExpert(ActionExpert):
         closing[2] = 0
         closing /= np.linalg.norm(closing)
         down = np.array([0.0, 0, -1.0])
-        self.grasp_rotation = Rotation.from_matrix(
+        self.arm.rotation = Rotation.from_matrix(
             np.column_stack((np.cross(closing, down), closing, down))
         )
         delta = (
@@ -60,7 +60,6 @@ class SweepExpert(ActionExpert):
         )
         self.distance = np.linalg.norm(delta)
         self.direction = delta / self.distance
-        self.arm.rotation = self.grasp_rotation
 
     def _prepare_sweep(self, observation, world):
         tcp = observation.values[f"robot/{self.side}/tcp_pose_world"]

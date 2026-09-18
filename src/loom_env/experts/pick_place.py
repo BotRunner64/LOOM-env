@@ -20,13 +20,15 @@ def lift_from_support(arm, support):
         return Extract(
             Rotation.from_quat(frame[3:]).apply([0, 0, 1]), contact_objects=(fixture,)
         )
-    goal = arm.grasp_goal()
+    if arm.asset.grasp is None:
+        raise ValueError("Grasp requires a reviewed grasp annotation")
     point = transform(
         arm.world[f"{arm.obj}/pose_world"], [*arm.asset.grasp, 0, 0, 0, 1]
     )[:3]
     point[2] = support[2] + 0.18 + arm.asset.grasp[2]
-    goal[:3] = arm.tcp_at(point)[:3]
-    return MoveHeld(goal, name="lift", allow_object_contact=True, attach=False)
+    return MoveHeld(
+        arm.tcp_at(point), name="lift", allow_object_contact=True, attach=False
+    )
 
 
 def initial_contacts(arm):

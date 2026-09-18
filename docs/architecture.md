@@ -60,7 +60,7 @@ Expert 是完整示范的执行策略，现有类名不是一套交互能力分�
 
 `experts/actions.py` 中的 `Grasp` 只负责接近并建立抓持，`MoveHeld` 负责已有抓持下的规划运动，`Extract` 负责沿给定退出轴的持物运动，`Release` 负责松开并观察释放；`Move` 提供不要求持物的规划运动。插入特有的对齐与进入控制是 `experts/insertion.py::Insert`，可以从入口附近的已有抓持状态独立开始，不负责取物和搬运。完整的 `InsertionExpert` 负责按初态选择准备动作，然后组合这些操作。动作完成只允许流程继续，不代表任务成功。
 
-动作使用显式的 `Manipulator` 状态／命令缓冲区，依赖当前观测、物体状态和规划器，不读取任务 ID 或完整流程的阶段编号。每个控制周期先 `update(observation, world)`，再调用当前动作的 `step(arm)`；它返回是否完成，失败抛出 `SourceFailure`。`ActionExpert` 只推进 Python 生成器、汇总命令及事件，没有动作注册表或流程配置语言。采集者仍使用原有的一步 `collect.py` 入口。
+动作使用显式的 `Manipulator` 状态／命令缓冲区，依赖当前观测、物体状态和规划器，不读取任务 ID 或完整流程的阶段编号。 每只手的规划器和操作几何分别通过 `arm.planner`、`arm.profile` 访问，expert 不另存一份 planner 引用或映射。每个控制周期先 `update(observation, world)`，再调用当前动作的 `step(arm)`；它返回是否完成，失败抛出 `SourceFailure`。`ActionExpert` 只推进 Python 生成器、汇总命令及事件，没有动作注册表或流程配置语言。采集者仍使用原有的一步 `collect.py` 入口。
 
 Push 与 Sweep 共用 `PushContact`，区别由速度、侧向修正、接触物体和持工具要求表达。Handover 依次切换同一执行器中的活动手，两手共享命令缓冲区，分别使用自身规划器；`holding` 指定当前必须保持真实抓持的手。接收手连续抓稳后，才进入递出手释放。Articulation 组合 `Move`、`CloseGripper`、`MoveJoint`、`Release`；关节类型只描述运动约束，`MoveJoint` 可以从已有活动 link 抓持独立开始。当前范围、接口示例、验证结果和运行命令集中在[共享动作重构](implementation.md#共享动作重构)。
 

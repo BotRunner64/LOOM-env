@@ -82,17 +82,17 @@ class MoveJoint(FeedbackAction):
 class ArticulationExpert(ActionExpert):
     def __init__(self, collection, planner, world_state):
         super().__init__(collection, planner, world_state)
-        self.side, self.obj, self.asset = self.arm.side, self.arm.obj, self.arm.asset
-        if collection.deployment.arms[self.side].asset != PANDA_ASSET:
+        arm = self.arm
+        if collection.deployment.arms[arm.side].asset != PANDA_ASSET:
             raise ValueError(
                 "Articulation grasp manipulation currently requires the reviewed Panda fingers"
             )
         self.target = collection.task.parameters["target_position"]
         physics = load_prepared(
-            planner.asset_root, collection.scene.objects[self.obj]["asset"]
+            planner.asset_root, collection.scene.objects[arm.obj]["asset"]
         )["physics_properties"]
         self.joint = physics["joint"]
-        self.contact_pose = self.asset.contact_poses[
+        self.contact_pose = arm.asset.contact_poses[
             int(collection.task.parameters["contact_index"])
         ]
         self.speed, self.precision = (
@@ -109,7 +109,7 @@ class ArticulationExpert(ActionExpert):
         # Grasp-frame +Z is the tool approach direction.
         point = contact[:3] - rotation.apply([0, 0, offset])
         return np.r_[
-            point - rotation.apply(self.planner.profile.tcp_to_grasp),
+            point - rotation.apply(self.arm.planner.profile.tcp_to_grasp),
             rotation.as_quat(),
         ]
 
