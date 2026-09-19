@@ -49,7 +49,7 @@ cameras:
     period_steps: 1
     parent_frame: world
     pose: [-0.25, 0.0, 1.55, -0.25929940790384143, 0.25929940790384143, 0.6578478677176944, -0.6578478677176944]
-  # ManiSkill camera_link optical offset; axis derivation: docs/embodiments.md.
+  # ManiSkill camera_link optical offset; camera conventions: docs/assets.md.
   - name: left_wrist
     width: 640
     height: 480

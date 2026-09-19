@@ -17,7 +17,7 @@ dependencies = [
     "imageio",
     "imageio-ffmpeg",
     "torch",
-    # NVIDIA publishes the Sim-compatible Lab wheel; see docs/environment.md.
+    # NVIDIA publishes the Sim-compatible Lab wheel; see docs/running.md.
     "isaacsim[all,extscache]>=6",
     "isaaclab[isaacsim]>=3.0.0b2",
     "warp-lang",

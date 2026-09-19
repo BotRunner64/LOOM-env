@@ -1,4 +1,4 @@
-# Panda tabletop baseline; validation scope is recorded in docs/embodiments.md.
+# Panda tabletop baseline; robot scope and preparation are in docs/assets.md.
 # Limits: the Franka URDF shipped with the pinned cuRobo version.
 id: dual_panda_tabletop
 control_type: joint_position
